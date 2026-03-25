@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vhrelastix*"]
+
+[tool.setuptools.package-data]
+vhrelastix = ["py.typed"]
+
+[project]
+name = "vhrelastix"
+version = "0.1.0"
+description = "Elastix-based geospatial pairwise raster alignment"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Kanoa Lindiwe", email = "cankanoa@gmail.com"},
+    {name = "Joseph Emile Honour Percival", email = "ipercival@gmail.com"}
+]
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+dependencies = [
+    "numpy>=2.2",
+    "rasterio>=1.4.3",
+    "itk-elastix>=0.19.2"
+]
+
+[project.urls]
+"Source" = "https://github.com/cankanoa/vhrelastix"
+
+[project.scripts]
+vhr-align-image-pair = "vhrelastix.cli.align_image_pair:main"
