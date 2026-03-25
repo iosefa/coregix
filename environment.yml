@@ -1,0 +1,15 @@
+name: coregix
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - gdal=3.12.*
+  - pip
+  - setuptools>=61
+  - wheel
+  - numpy
+  - rasterio>=1.4.3
+  - pip:
+      - itk-elastix>=0.19.2
+      - -e .
