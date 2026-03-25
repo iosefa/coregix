@@ -14,9 +14,8 @@ from rasterio.warp import reproject
 from rasterio.windows import Window, from_bounds
 
 from coregix.preprocess.registration import (
-    apply_elastix_transform_subprocess,
+    apply_elastix_transform,
     estimate_elastix_transform,
-    write_transform_parameter_files,
 )
 
 DEFAULT_ALIGNMENT_PARAMETER_MAPS = ["translation", "rigid"]
@@ -449,11 +448,6 @@ def align_image_pair(
             except Exception as exc:
                 raise RuntimeError(f"Elastix registration failed: {exc}") from exc
 
-            serialized_transform_files = write_transform_parameter_files(
-                transform_parameter_object,
-                os.path.join(work_dir, "transform"),
-            )
-
             for b in range(1, moving_src.count + 1):
                 moving_band_path = os.path.join(work_dir, f"moving_band_{b:03d}.tif")
                 moving_band_data = moving_src.read(b, window=moving_window).astype(np.float32)
@@ -485,10 +479,10 @@ def align_image_pair(
                 )
 
                 transformed_band_path = os.path.join(work_dir, f"warped_band_{b:03d}.tif")
-                apply_elastix_transform_subprocess(
+                apply_elastix_transform(
                     moving_image_path=moving_band_path,
                     output_image_path=transformed_band_path,
-                    parameter_files=serialized_transform_files,
+                    transform_parameter_object=transform_parameter_object,
                     reference_image_path=fixed_reg_path,
                     log_to_console=log_to_console,
                 )
