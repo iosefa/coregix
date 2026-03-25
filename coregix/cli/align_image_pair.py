@@ -7,7 +7,7 @@ import os
 import sys
 from typing import Optional
 
-from vhrelastix.pipelines.alignment import align_image_pair
+from coregix.pipelines.alignment import align_image_pair
 
 
 def build_parser() -> argparse.ArgumentParser:

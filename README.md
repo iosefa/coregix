@@ -1,4 +1,4 @@
-# VHR Elastix Align
+# Coregix
 
 Standalone extraction of the elastix-based pairwise raster alignment workflow from `vhrharmonize`.
 

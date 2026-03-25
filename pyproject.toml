@@ -6,13 +6,13 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["vhrelastix*"]
+include = ["coregix*"]
 
 [tool.setuptools.package-data]
-vhrelastix = ["py.typed"]
+coregix = ["py.typed"]
 
 [project]
-name = "vhrelastix"
+name = "coregix"
 version = "0.1.0"
 description = "Elastix-based geospatial pairwise raster alignment"
 readme = "README.md"
@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [project.urls]
-"Source" = "https://github.com/cankanoa/vhrelastix"
+"Source" = "https://github.com/cankanoa/coregix"
 
 [project.scripts]
-vhr-align-image-pair = "vhrelastix.cli.align_image_pair:main"
+vhr-align-image-pair = "coregix.cli.align_image_pair:main"

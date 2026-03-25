@@ -13,7 +13,7 @@ from rasterio.enums import Resampling
 from rasterio.warp import reproject
 from rasterio.windows import Window, from_bounds
 
-from vhrelastix.preprocess.registration import (
+from coregix.preprocess.registration import (
     apply_elastix_transform_subprocess,
     estimate_elastix_transform,
     write_transform_parameter_files,
