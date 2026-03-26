@@ -55,6 +55,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--large-raster-mode",
+        dest="large_raster_mode",
+        action="store_true",
+        help=(
+            "Use the slower, lower-memory large-raster path with per-band "
+            "temporary TIFFs and subprocess-isolated transform application."
+        ),
+    )
+    parser.add_argument(
+        "--use-disk-band-roundtrip",
+        dest="large_raster_mode",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--moving-nodata",
         type=float,
         help="Optional override nodata value for moving image masking.",
@@ -150,6 +165,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         output_on_moving_grid=args.output_on_moving_grid,
         enforce_mutual_valid_mask=args.enforce_mutual_valid_mask,
         use_edge_proxies=args.use_edge_proxies,
+        large_raster_mode=args.large_raster_mode,
     )
 
     print(

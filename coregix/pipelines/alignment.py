@@ -14,8 +14,10 @@ from rasterio.warp import reproject
 from rasterio.windows import Window, from_bounds
 
 from coregix.preprocess.registration import (
-    apply_elastix_transform,
+    apply_elastix_transform_array,
+    apply_elastix_transform_subprocess,
     estimate_elastix_transform,
+    write_transform_parameter_files,
 )
 
 DEFAULT_ALIGNMENT_PARAMETER_MAPS = ["translation", "rigid"]
@@ -64,6 +66,52 @@ def _write_single_band_tif(
     }
     with rasterio.open(path, "w", **profile) as dst:
         dst.write(data, 1)
+
+
+def _stream_reprojected_band_to_tif(
+    path: str,
+    *,
+    src: rasterio.DatasetReader,
+    band_index: int,
+    dst_crs,
+    dst_transform,
+    dst_width: int,
+    dst_height: int,
+    src_nodata: Optional[float],
+    dst_fill_value: float,
+    output_nodata: Optional[float],
+) -> None:
+    """Reproject a source band into a temporary TIFF without materializing the full band."""
+    profile = {
+        "driver": "GTiff",
+        "count": 1,
+        "height": int(dst_height),
+        "width": int(dst_width),
+        "dtype": "float32",
+        "crs": dst_crs,
+        "transform": dst_transform,
+        "nodata": output_nodata,
+        "bigtiff": "yes",
+    }
+    with rasterio.open(path, "w", **profile) as dst:
+        for _, block_window in dst.block_windows(1):
+            block = np.full(
+                (int(block_window.height), int(block_window.width)),
+                dst_fill_value,
+                dtype=np.float32,
+            )
+            reproject(
+                source=rasterio.band(src, band_index),
+                destination=block,
+                src_transform=src.transform,
+                src_crs=src.crs,
+                src_nodata=src_nodata,
+                dst_transform=rasterio.windows.transform(block_window, dst_transform),
+                dst_crs=dst_crs,
+                dst_nodata=dst_fill_value,
+                resampling=Resampling.nearest,
+            )
+            dst.write(block, 1, window=block_window)
 
 
 def _make_output_profile(
@@ -136,6 +184,7 @@ def align_image_pair(
     output_on_moving_grid: bool = True,
     enforce_mutual_valid_mask: bool = False,
     use_edge_proxies: bool = True,
+    large_raster_mode: bool = False,
 ) -> AlignmentResult:
     """Align a moving image onto a fixed image using the core elastix workflow.
 
@@ -167,6 +216,9 @@ def align_image_pair(
             elastix masks to the mutual valid-data overlap of both images.
         use_edge_proxies: If ``True``, register on edge-proxy images rather than
             raw intensities.
+        large_raster_mode: If ``True``, use the slower, lower-memory large-raster
+            path with per-band temporary TIFFs and subprocess-isolated transform
+            application.
 
     Returns:
         AlignmentResult summary with output path.
@@ -449,49 +501,113 @@ def align_image_pair(
                 raise RuntimeError(f"Elastix registration failed: {exc}") from exc
 
             for b in range(1, moving_src.count + 1):
-                moving_band_path = os.path.join(work_dir, f"moving_band_{b:03d}.tif")
-                moving_band_data = moving_src.read(b, window=moving_window).astype(np.float32)
-                # Registration is estimated on moving data resampled to the fixed-grid
-                # ROI. Apply transforms in that same geometry.
-                moving_band_on_fixed = np.full(
-                    (int(fixed_window.height), int(fixed_window.width)),
-                    out_nodata,
-                    dtype=np.float32,
-                )
-                reproject(
-                    source=moving_band_data,
-                    destination=moving_band_on_fixed,
-                    src_transform=moving_src.window_transform(moving_window),
-                    src_crs=moving_src.crs,
-                    dst_transform=fixed_src.window_transform(fixed_window),
-                    dst_crs=fixed_src.crs,
-                    src_nodata=moving_nodata_value,
-                    dst_nodata=out_nodata,
-                    resampling=Resampling.nearest,
-                )
-                _write_single_band_tif(
-                    moving_band_path,
-                    moving_band_on_fixed.astype("float32"),
-                    crs=fixed_src.crs,
-                    transform=fixed_src.window_transform(fixed_window),
-                    dtype="float32",
-                    nodata=moving_nodata_value,
-                )
-
-                transformed_band_path = os.path.join(work_dir, f"warped_band_{b:03d}.tif")
-                apply_elastix_transform(
-                    moving_image_path=moving_band_path,
-                    output_image_path=transformed_band_path,
-                    transform_parameter_object=transform_parameter_object,
-                    reference_image_path=fixed_reg_path,
-                    log_to_console=log_to_console,
-                )
-                with rasterio.open(transformed_band_path) as warped_src:
-                    warped_full = warped_src.read(1)
-                if output_on_moving_grid:
+                if large_raster_mode:
+                    moving_band_path = os.path.join(work_dir, f"moving_band_{b:03d}.tif")
+                    _stream_reprojected_band_to_tif(
+                        moving_band_path,
+                        src=moving_src,
+                        band_index=b,
+                        dst_crs=fixed_src.crs,
+                        dst_transform=fixed_src.window_transform(fixed_window),
+                        dst_width=int(fixed_window.width),
+                        dst_height=int(fixed_window.height),
+                        src_nodata=moving_nodata_value,
+                        dst_fill_value=out_nodata,
+                        output_nodata=moving_nodata_value,
+                    )
+                    if b == 1:
+                        serialized_transform_files = write_transform_parameter_files(
+                            transform_parameter_object,
+                            os.path.join(work_dir, "transform"),
+                        )
+                    transformed_band_path = os.path.join(work_dir, f"warped_band_{b:03d}.tif")
+                    apply_elastix_transform_subprocess(
+                        moving_image_path=moving_band_path,
+                        output_image_path=transformed_band_path,
+                        parameter_files=serialized_transform_files,
+                        reference_image_path=fixed_reg_path,
+                        log_to_console=log_to_console,
+                    )
                     with rasterio.open(transformed_band_path) as warped_src:
-                        src_transform = warped_src.transform
-                        src_crs = warped_src.crs or fixed_src.crs
+                        if output_on_moving_grid:
+                            src_transform = warped_src.transform
+                            src_crs = warped_src.crs or fixed_src.crs
+                            aligned_window_transform = moving_src.window_transform(moving_window)
+                            block_width, block_height = out_dst.block_shapes[b - 1]
+                            for row_off in range(0, int(moving_window.height), int(block_height)):
+                                for col_off in range(0, int(moving_window.width), int(block_width)):
+                                    win_w = min(int(block_width), int(moving_window.width) - col_off)
+                                    win_h = min(int(block_height), int(moving_window.height) - row_off)
+                                    block_window = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
+                                    remapped_block = np.full(
+                                        (win_h, win_w),
+                                        out_nodata,
+                                        dtype=np.float32,
+                                    )
+                                    reproject(
+                                        source=rasterio.band(warped_src, 1),
+                                        destination=remapped_block,
+                                        src_transform=src_transform,
+                                        src_crs=src_crs,
+                                        src_nodata=out_nodata,
+                                        dst_transform=rasterio.windows.transform(block_window, aligned_window_transform),
+                                        dst_crs=moving_src.crs,
+                                        dst_nodata=out_nodata,
+                                        resampling=Resampling.bilinear,
+                                    )
+                                    source_block_window = Window(
+                                        col_off=int(moving_window.col_off + col_off),
+                                        row_off=int(moving_window.row_off + row_off),
+                                        width=win_w,
+                                        height=win_h,
+                                    )
+                                    existing_block = moving_src.read(
+                                        b,
+                                        window=source_block_window,
+                                    ).astype(np.float32)
+                                    valid = remapped_block != out_nodata
+                                    combined = np.where(valid, remapped_block, existing_block)
+                                    out_dst.write(
+                                        combined.astype(out_profile["dtype"]),
+                                        b,
+                                        window=source_block_window,
+                                    )
+                        else:
+                            for _, block_window in warped_src.block_windows(1):
+                                block = warped_src.read(1, window=block_window)
+                                out_dst.write(
+                                    block.astype(out_profile["dtype"]),
+                                    b,
+                                    window=block_window,
+                                )
+                else:
+                    moving_band_data = moving_src.read(b, window=moving_window).astype(np.float32)
+                    # Registration is estimated on moving data resampled to the fixed-grid
+                    # ROI. Apply transforms in that same geometry.
+                    moving_band_on_fixed = np.full(
+                        (int(fixed_window.height), int(fixed_window.width)),
+                        out_nodata,
+                        dtype=np.float32,
+                    )
+                    reproject(
+                        source=moving_band_data,
+                        destination=moving_band_on_fixed,
+                        src_transform=moving_src.window_transform(moving_window),
+                        src_crs=moving_src.crs,
+                        dst_transform=fixed_src.window_transform(fixed_window),
+                        dst_crs=fixed_src.crs,
+                        src_nodata=moving_nodata_value,
+                        dst_nodata=out_nodata,
+                        resampling=Resampling.nearest,
+                    )
+                    warped_full = apply_elastix_transform_array(
+                        moving_image=moving_band_on_fixed,
+                        transform_parameter_object=transform_parameter_object,
+                        log_to_console=log_to_console,
+                    )
+                    if output_on_moving_grid:
+                        src_transform = fixed_src.window_transform(fixed_window)
+                        src_crs = fixed_src.crs
                         aligned_window_transform = moving_src.window_transform(moving_window)
                         block_width, block_height = out_dst.block_shapes[b - 1]
                         for row_off in range(0, int(moving_window.height), int(block_height)):
@@ -505,7 +621,7 @@ def align_image_pair(
                                     dtype=np.float32,
                                 )
                                 reproject(
-                                    source=rasterio.band(warped_src, 1),
+                                    source=warped_full,
                                     destination=remapped_block,
                                     src_transform=src_transform,
                                     src_crs=src_crs,
@@ -532,8 +648,8 @@ def align_image_pair(
                                     b,
                                     window=source_block_window,
                                 )
-                else:
-                    out_dst.write(warped_full.astype(out_profile["dtype"]), b, window=core_out_window)
+                    else:
+                        out_dst.write(warped_full.astype(out_profile["dtype"]), b, window=core_out_window)
 
     if temp_ctx is not None:
         temp_ctx.cleanup()

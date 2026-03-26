@@ -4,6 +4,8 @@ import subprocess
 import sys
 from typing import Any, Optional, Sequence, Union
 
+import numpy as np
+
 
 def _require_itk():
     try:
@@ -135,6 +137,23 @@ def apply_elastix_transform(
     return output_image_path
 
 
+def apply_elastix_transform_array(
+    moving_image: np.ndarray,
+    transform_parameter_object: Any,
+    *,
+    log_to_console: bool = False,
+) -> np.ndarray:
+    """Apply a precomputed elastix transform to an in-memory image array."""
+    itk = _require_itk()
+    moving = itk.image_from_array(np.asarray(moving_image, dtype=np.float32))
+    transformed = itk.transformix_filter(
+        moving,
+        transform_parameter_object=transform_parameter_object,
+        log_to_console=log_to_console,
+    )
+    return itk.array_from_image(transformed)
+
+
 def write_transform_parameter_files(
     transform_parameter_object: Any,
     output_prefix: str,
@@ -249,6 +268,7 @@ def run_elastix_registration(
 __all__ = [
     "estimate_elastix_transform",
     "apply_elastix_transform",
+    "apply_elastix_transform_array",
     "apply_elastix_transform_subprocess",
     "run_elastix_registration",
     "write_transform_parameter_files",
