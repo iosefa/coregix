@@ -90,6 +90,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.01,
         help="Minimum valid-mask fraction required to run elastix (default: 0.01).",
     )
+    parser.add_argument(
+        "--solve-resolution",
+        type=float,
+        help=(
+            "Optional target pixel size, in raster CRS units, for the registration solve. "
+            "Defaults to the fixed-image ROI resolution."
+        ),
+    )
     parser.add_argument("--temp-dir", help="Optional parent directory for temporary working files.")
     parser.add_argument(
         "--keep-temp-dir",
@@ -145,6 +153,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error("--fixed-band-index must be >= 0.")
     if args.min_valid_fraction <= 0 or args.min_valid_fraction > 1:
         parser.error("--min-valid-fraction must be in (0, 1].")
+    if args.solve_resolution is not None and args.solve_resolution <= 0:
+        parser.error("--solve-resolution must be > 0.")
 
     result = align_image_pair(
         moving_image_path=args.moving_image,
@@ -166,6 +176,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         enforce_mutual_valid_mask=args.enforce_mutual_valid_mask,
         use_edge_proxies=args.use_edge_proxies,
         large_raster_mode=args.large_raster_mode,
+        solve_resolution=args.solve_resolution,
     )
 
     print(
