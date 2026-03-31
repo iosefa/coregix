@@ -18,7 +18,6 @@ from coregix.preprocess.registration import (
     apply_elastix_transform_array,
     apply_elastix_transform_subprocess,
     deformation_field_from_transform,
-    deformation_field_from_transform_region,
     estimate_elastix_transform,
     write_transform_parameter_files,
 )
@@ -630,7 +629,7 @@ def align_image_pair(
             except Exception as exc:
                 raise RuntimeError(f"Elastix registration failed: {exc}") from exc
 
-            if output_on_moving_grid and not large_raster_mode:
+            if output_on_moving_grid:
                 deformation_field = deformation_field_from_transform(
                     fixed_reg_path,
                     transform_parameter_object,
@@ -660,37 +659,16 @@ def align_image_pair(
                             y_world,
                         )
 
-                        fixed_row_min = max(0, int(np.floor(float(solve_rows.min()))) - 1)
-                        fixed_col_min = max(0, int(np.floor(float(solve_cols.min()))) - 1)
-                        fixed_row_max = min(int(solve_height), int(np.ceil(float(solve_rows.max()))) + 2)
-                        fixed_col_max = min(int(solve_width), int(np.ceil(float(solve_cols.max()))) + 2)
-
-                        if fixed_row_min >= fixed_row_max or fixed_col_min >= fixed_col_max:
-                            nodata_block = np.full((win_h, win_w), out_nodata, dtype=out_profile["dtype"])
-                            for b in range(1, moving_src.count + 1):
-                                out_dst.write(nodata_block, b, window=output_block_window)
-                            continue
-
-                        local_field = deformation_field_from_transform_region(
-                            transform_parameter_object,
-                            row_off=fixed_row_min,
-                            col_off=fixed_col_min,
-                            height=fixed_row_max - fixed_row_min,
-                            width=fixed_col_max - fixed_col_min,
-                            output_directory=work_dir,
-                        ).astype(np.float32)
-                        local_dx = local_field[..., 0]
-                        local_dy = local_field[..., 1]
                         dx_block, dx_valid = _sample_bilinear(
-                            local_dx,
-                            solve_rows - fixed_row_min,
-                            solve_cols - fixed_col_min,
+                            fixed_dx,
+                            solve_rows,
+                            solve_cols,
                             fill_value=0.0,
                         )
                         dy_block, dy_valid = _sample_bilinear(
-                            local_dy,
-                            solve_rows - fixed_row_min,
-                            solve_cols - fixed_col_min,
+                            fixed_dy,
+                            solve_rows,
+                            solve_cols,
                             fill_value=0.0,
                         )
                         field_valid = dx_valid & dy_valid
