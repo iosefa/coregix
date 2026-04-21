@@ -166,6 +166,369 @@ def _edge_proxy(data: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
     return edge.astype(np.float32)
 
 
+def _align_image_pair_large_raster_main(
+    moving_image_path: str,
+    fixed_image_path: str,
+    output_image_path: str,
+    *,
+    band_index: int = 0,
+    moving_band_index: Optional[int] = None,
+    fixed_band_index: Optional[int] = None,
+    parameter_file_paths: Optional[List[str]] = None,
+    moving_nodata: Optional[float] = None,
+    fixed_nodata: Optional[float] = None,
+    output_nodata: Optional[float] = None,
+    min_valid_fraction: float = 0.01,
+    temp_dir: Optional[str] = None,
+    keep_temp_dir: bool = False,
+    log_to_console: bool = False,
+    clip_fixed_to_moving: bool = False,
+    output_on_moving_grid: bool = True,
+    enforce_mutual_valid_mask: bool = False,
+    use_edge_proxies: bool = True,
+) -> AlignmentResult:
+    """Large-raster execution path copied from main."""
+    temp_ctx = None
+    work_dir: str
+    if keep_temp_dir:
+        work_dir = tempfile.mkdtemp(prefix="vhr_align_", dir=temp_dir)
+    else:
+        temp_ctx = tempfile.TemporaryDirectory(prefix="vhr_align_", dir=temp_dir)
+        work_dir = temp_ctx.name
+
+    with rasterio.open(fixed_image_path) as fixed_src, rasterio.open(moving_image_path) as moving_src:
+        moving_band_1based = (moving_band_index if moving_band_index is not None else band_index) + 1
+        fixed_band_1based = (fixed_band_index if fixed_band_index is not None else band_index) + 1
+        if fixed_band_1based > fixed_src.count:
+            raise ValueError(
+                f"Requested fixed band index={fixed_band_1based - 1}, but fixed image has {fixed_src.count} band(s)."
+            )
+        if moving_band_1based > moving_src.count:
+            raise ValueError(
+                f"Requested moving band index={moving_band_1based - 1}, but moving image has {moving_src.count} band(s)."
+            )
+        if fixed_src.crs is None or moving_src.crs is None:
+            raise ValueError("Both fixed and moving images must have CRS.")
+        if fixed_src.crs != moving_src.crs:
+            raise ValueError(
+                "Fixed and moving images must share the same CRS for tile-window extraction. "
+                f"fixed={fixed_src.crs}, moving={moving_src.crs}"
+            )
+
+        moving_nodata_value = _resolve_nodata(moving_src, moving_nodata)
+        fixed_nodata_value = _resolve_nodata(fixed_src, fixed_nodata)
+        out_nodata = (
+            output_nodata
+            if output_nodata is not None
+            else moving_nodata_value
+            if moving_nodata_value is not None
+            else fixed_nodata_value
+            if fixed_nodata_value is not None
+            else 0
+        )
+
+        if clip_fixed_to_moving:
+            fixed_domain_window = _to_int_window(
+                from_bounds(
+                    left=moving_src.bounds.left,
+                    bottom=moving_src.bounds.bottom,
+                    right=moving_src.bounds.right,
+                    top=moving_src.bounds.top,
+                    transform=fixed_src.transform,
+                ),
+                max_width=fixed_src.width,
+                max_height=fixed_src.height,
+            )
+            if fixed_domain_window.width <= 0 or fixed_domain_window.height <= 0:
+                raise ValueError("No overlap between moving-image bounds and fixed-image grid.")
+        else:
+            fixed_domain_window = Window(col_off=0, row_off=0, width=fixed_src.width, height=fixed_src.height)
+
+        os.makedirs(os.path.dirname(output_image_path) or ".", exist_ok=True)
+        if output_on_moving_grid:
+            out_profile = _make_output_profile(
+                moving_src.profile,
+                count=moving_src.count,
+                dtype=moving_src.dtypes[0],
+                nodata=out_nodata,
+            )
+        else:
+            out_profile = _make_output_profile(
+                fixed_src.profile,
+                count=moving_src.count,
+                dtype=moving_src.dtypes[0],
+                nodata=out_nodata,
+                width=int(fixed_domain_window.width),
+                height=int(fixed_domain_window.height),
+                transform=fixed_src.window_transform(fixed_domain_window),
+            )
+
+        fixed_window = fixed_domain_window
+        core_out_window = Window(
+            col_off=0,
+            row_off=0,
+            width=int(fixed_domain_window.width),
+            height=int(fixed_domain_window.height),
+        )
+        fixed_window_transform = fixed_src.window_transform(fixed_window)
+        fixed_bounds = fixed_src.window_bounds(fixed_window)
+        moving_window = _to_int_window(
+            from_bounds(
+                left=fixed_bounds[0],
+                bottom=fixed_bounds[1],
+                right=fixed_bounds[2],
+                top=fixed_bounds[3],
+                transform=moving_src.transform,
+            ),
+            max_width=moving_src.width,
+            max_height=moving_src.height,
+        )
+        if moving_window.width <= 0 or moving_window.height <= 0:
+            raise ValueError("No overlap between fixed-image ROI and moving-image grid.")
+        moving_window_transform = moving_src.window_transform(moving_window)
+
+        with rasterio.open(output_image_path, "w+", **out_profile) as out_dst:
+            try:
+                out_dst.colorinterp = moving_src.colorinterp
+            except Exception:
+                pass
+            try:
+                out_dst.scales = moving_src.scales
+                out_dst.offsets = moving_src.offsets
+            except Exception:
+                pass
+            for b in range(1, moving_src.count + 1):
+                desc = moving_src.descriptions[b - 1]
+                if desc:
+                    out_dst.set_band_description(b, desc)
+                band_tags = moving_src.tags(b).copy()
+                for k in list(band_tags.keys()):
+                    if k.upper().startswith("STATISTICS_"):
+                        band_tags.pop(k, None)
+                out_dst.update_tags(b, **band_tags)
+                out_dst.update_tags(
+                    b,
+                    STATISTICS_MINIMUM="",
+                    STATISTICS_MAXIMUM="",
+                    STATISTICS_MEAN="",
+                    STATISTICS_STDDEV="",
+                )
+
+            if output_on_moving_grid:
+                for b in range(1, moving_src.count + 1):
+                    for _, block_window in out_dst.block_windows(b):
+                        src_block = moving_src.read(b, window=block_window)
+                        out_dst.write(src_block.astype(out_profile["dtype"]), b, window=block_window)
+            else:
+                for b in range(1, moving_src.count + 1):
+                    for _, block_window in out_dst.block_windows(b):
+                        fill = np.full(
+                            (int(block_window.height), int(block_window.width)),
+                            out_nodata,
+                            dtype=out_profile["dtype"],
+                        )
+                        out_dst.write(fill, b, window=block_window)
+
+            fixed_band = fixed_src.read(fixed_band_1based, window=fixed_window)
+            moving_band = moving_src.read(moving_band_1based, window=moving_window)
+            fixed_valid = fixed_src.read_masks(fixed_band_1based, window=fixed_window) > 0
+            moving_valid = moving_src.read_masks(moving_band_1based, window=moving_window) > 0
+            if fixed_nodata_value is not None:
+                fixed_valid &= fixed_band != fixed_nodata_value
+            if moving_nodata_value is not None:
+                moving_valid &= moving_band != moving_nodata_value
+
+            moving_valid_reprojected = np.zeros(
+                (int(fixed_window.height), int(fixed_window.width)),
+                dtype=np.uint8,
+            )
+            reproject(
+                source=moving_valid.astype(np.uint8),
+                destination=moving_valid_reprojected,
+                src_transform=moving_window_transform,
+                src_crs=moving_src.crs,
+                dst_transform=fixed_window_transform,
+                dst_crs=fixed_src.crs,
+                src_nodata=0,
+                dst_nodata=0,
+                resampling=Resampling.nearest,
+            )
+
+            fixed_reg_data = fixed_band.astype(np.float32)
+            moving_on_fixed = np.full(
+                (int(fixed_window.height), int(fixed_window.width)),
+                moving_nodata_value if moving_nodata_value is not None else out_nodata,
+                dtype=np.float32,
+            )
+            reproject(
+                source=moving_band.astype(np.float32),
+                destination=moving_on_fixed,
+                src_transform=moving_window_transform,
+                src_crs=moving_src.crs,
+                dst_transform=fixed_window_transform,
+                dst_crs=fixed_src.crs,
+                src_nodata=moving_nodata_value,
+                dst_nodata=moving_nodata_value if moving_nodata_value is not None else out_nodata,
+                resampling=Resampling.nearest,
+            )
+            moving_on_fixed_valid = moving_valid_reprojected > 0
+            if use_edge_proxies:
+                fixed_reg_data = _edge_proxy(fixed_reg_data, fixed_valid)
+                moving_reg_data = _edge_proxy(moving_on_fixed, moving_on_fixed_valid)
+                fixed_mask_for_elastix = (fixed_reg_data > 0).astype(np.uint8)
+                moving_mask_for_elastix = (moving_reg_data > 0).astype(np.uint8)
+            else:
+                moving_reg_data = moving_on_fixed
+                fixed_mask_for_elastix = fixed_valid.astype(np.uint8)
+                moving_mask_for_elastix = moving_on_fixed_valid.astype(np.uint8)
+            if enforce_mutual_valid_mask:
+                mutual = (fixed_mask_for_elastix > 0) & (moving_mask_for_elastix > 0)
+                fixed_mask_for_elastix = mutual.astype(np.uint8)
+                moving_mask_for_elastix = mutual.astype(np.uint8)
+
+            min_valid_pixels = int(max(1, min_valid_fraction * (fixed_window.width * fixed_window.height)))
+            if int(fixed_mask_for_elastix.sum()) < min_valid_pixels:
+                raise ValueError("Insufficient valid fixed-image support in the registration ROI.")
+            if int(moving_mask_for_elastix.sum()) < min_valid_pixels:
+                raise ValueError("Insufficient valid moving-image support in the registration ROI.")
+
+            fixed_reg_path = os.path.join(work_dir, "fixed_reg.tif")
+            moving_reg_path = os.path.join(work_dir, "moving_reg.tif")
+            fixed_mask_path = os.path.join(work_dir, "fixed_mask.tif")
+            moving_mask_path = os.path.join(work_dir, "moving_mask.tif")
+
+            _write_single_band_tif(
+                fixed_reg_path,
+                fixed_reg_data.astype("float32"),
+                crs=fixed_src.crs,
+                transform=fixed_window_transform,
+                dtype="float32",
+                nodata=fixed_nodata_value,
+            )
+            _write_single_band_tif(
+                moving_reg_path,
+                moving_reg_data.astype("float32"),
+                crs=fixed_src.crs,
+                transform=fixed_window_transform,
+                dtype="float32",
+                nodata=moving_nodata_value,
+            )
+            _write_single_band_tif(
+                fixed_mask_path,
+                fixed_mask_for_elastix.astype("uint8"),
+                crs=fixed_src.crs,
+                transform=fixed_window_transform,
+                dtype="uint8",
+                nodata=0,
+            )
+            _write_single_band_tif(
+                moving_mask_path,
+                moving_mask_for_elastix.astype("uint8"),
+                crs=fixed_src.crs,
+                transform=fixed_window_transform,
+                dtype="uint8",
+                nodata=0,
+            )
+
+            try:
+                transform_parameter_object = estimate_elastix_transform(
+                    fixed_image_path=fixed_reg_path,
+                    moving_image_path=moving_reg_path,
+                    parameter_map=DEFAULT_ALIGNMENT_PARAMETER_MAPS,
+                    parameter_file_paths=parameter_file_paths,
+                    force_nearest_resample=True,
+                    fixed_mask_path=fixed_mask_path,
+                    moving_mask_path=moving_mask_path,
+                    log_to_console=log_to_console,
+                )
+            except Exception as exc:
+                raise RuntimeError(f"Elastix registration failed: {exc}") from exc
+
+            for b in range(1, moving_src.count + 1):
+                moving_band_path = os.path.join(work_dir, f"moving_band_{b:03d}.tif")
+                _stream_reprojected_band_to_tif(
+                    moving_band_path,
+                    src=moving_src,
+                    band_index=b,
+                    dst_crs=fixed_src.crs,
+                    dst_transform=fixed_window_transform,
+                    dst_width=int(fixed_window.width),
+                    dst_height=int(fixed_window.height),
+                    src_nodata=moving_nodata_value,
+                    dst_fill_value=out_nodata,
+                    output_nodata=moving_nodata_value,
+                )
+                if b == 1:
+                    serialized_transform_files = write_transform_parameter_files(
+                        transform_parameter_object,
+                        os.path.join(work_dir, "transform"),
+                    )
+                transformed_band_path = os.path.join(work_dir, f"warped_band_{b:03d}.tif")
+                apply_elastix_transform_subprocess(
+                    moving_image_path=moving_band_path,
+                    output_image_path=transformed_band_path,
+                    parameter_files=serialized_transform_files,
+                    reference_image_path=fixed_reg_path,
+                    log_to_console=log_to_console,
+                )
+                with rasterio.open(transformed_band_path) as warped_src:
+                    if output_on_moving_grid:
+                        src_transform = warped_src.transform
+                        src_crs = warped_src.crs or fixed_src.crs
+                        aligned_window_transform = moving_window_transform
+                        block_width, block_height = out_dst.block_shapes[b - 1]
+                        for row_off in range(0, int(moving_window.height), int(block_height)):
+                            for col_off in range(0, int(moving_window.width), int(block_width)):
+                                win_w = min(int(block_width), int(moving_window.width) - col_off)
+                                win_h = min(int(block_height), int(moving_window.height) - row_off)
+                                block_window = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
+                                remapped_block = np.full((win_h, win_w), out_nodata, dtype=np.float32)
+                                reproject(
+                                    source=rasterio.band(warped_src, 1),
+                                    destination=remapped_block,
+                                    src_transform=src_transform,
+                                    src_crs=src_crs,
+                                    src_nodata=out_nodata,
+                                    dst_transform=rasterio.windows.transform(block_window, aligned_window_transform),
+                                    dst_crs=moving_src.crs,
+                                    dst_nodata=out_nodata,
+                                    resampling=Resampling.bilinear,
+                                )
+                                source_block_window = Window(
+                                    col_off=int(moving_window.col_off + col_off),
+                                    row_off=int(moving_window.row_off + row_off),
+                                    width=win_w,
+                                    height=win_h,
+                                )
+                                existing_block = moving_src.read(b, window=source_block_window).astype(np.float32)
+                                valid = remapped_block != out_nodata
+                                combined = np.where(valid, remapped_block, existing_block)
+                                out_dst.write(
+                                    combined.astype(out_profile["dtype"]),
+                                    b,
+                                    window=source_block_window,
+                                )
+                    else:
+                        for _, block_window in warped_src.block_windows(1):
+                            block = warped_src.read(1, window=block_window)
+                            out_dst.write(
+                                block.astype(out_profile["dtype"]),
+                                b,
+                                window=block_window,
+                            )
+
+    if temp_ctx is not None:
+        temp_ctx.cleanup()
+        kept_temp = None
+    else:
+        kept_temp = work_dir
+
+    return AlignmentResult(
+        output_image_path=output_image_path,
+        temp_dir=kept_temp,
+    )
+
+
 def _sample_bilinear(
     data: np.ndarray,
     row_coords: np.ndarray,
@@ -328,6 +691,31 @@ def align_image_pair(
         raise ValueError("fixed_band_index must be >= 0 (0-based).")
     if min_valid_fraction <= 0 or min_valid_fraction > 1:
         raise ValueError("min_valid_fraction must be in (0, 1].")
+    if large_raster_mode:
+        from coregix.pipelines.alignment_large_main import (
+            align_image_pair as align_image_pair_large_main,
+        )
+
+        return align_image_pair_large_main(
+            moving_image_path,
+            fixed_image_path,
+            output_image_path,
+            band_index=band_index,
+            moving_band_index=moving_band_index,
+            fixed_band_index=fixed_band_index,
+            parameter_file_paths=parameter_file_paths,
+            moving_nodata=moving_nodata,
+            fixed_nodata=fixed_nodata,
+            output_nodata=output_nodata,
+            min_valid_fraction=min_valid_fraction,
+            temp_dir=temp_dir,
+            keep_temp_dir=keep_temp_dir,
+            log_to_console=log_to_console,
+            clip_fixed_to_moving=clip_fixed_to_moving,
+            output_on_moving_grid=output_on_moving_grid,
+            enforce_mutual_valid_mask=enforce_mutual_valid_mask,
+            use_edge_proxies=use_edge_proxies,
+        )
     if solve_resolution is not None and solve_resolution <= 0:
         raise ValueError("solve_resolution must be > 0 when provided.")
 
@@ -433,12 +821,17 @@ def align_image_pair(
         if moving_window.width <= 0 or moving_window.height <= 0:
             raise ValueError("No overlap between fixed-image ROI and moving-image grid.")
         moving_window_transform = moving_src.window_transform(moving_window)
-        solve_width, solve_height, solve_transform = _resolve_solve_grid(
-            base_transform=fixed_window_transform,
-            base_width=int(fixed_window.width),
-            base_height=int(fixed_window.height),
-            solve_resolution=solve_resolution,
-        )
+        if large_raster_mode:
+            solve_width = int(fixed_window.width)
+            solve_height = int(fixed_window.height)
+            solve_transform = fixed_window_transform
+        else:
+            solve_width, solve_height, solve_transform = _resolve_solve_grid(
+                base_transform=fixed_window_transform,
+                base_width=int(fixed_window.width),
+                base_height=int(fixed_window.height),
+                solve_resolution=solve_resolution,
+            )
 
         with rasterio.open(output_image_path, "w+", **out_profile) as out_dst:
             # Preserve radiometric/band metadata from moving image and clear stale stats
@@ -496,82 +889,122 @@ def align_image_pair(
             if moving_nodata_value is not None:
                 moving_valid &= moving_band != moving_nodata_value
 
-            fixed_reg_data = np.full(
-                (int(solve_height), int(solve_width)),
-                fixed_nodata_value if fixed_nodata_value is not None else out_nodata,
-                dtype=np.float32,
-            )
-            reproject(
-                source=fixed_band.astype(np.float32),
-                destination=fixed_reg_data,
-                src_transform=fixed_window_transform,
-                src_crs=fixed_src.crs,
-                dst_transform=solve_transform,
-                dst_crs=fixed_src.crs,
-                src_nodata=fixed_nodata_value,
-                dst_nodata=fixed_nodata_value if fixed_nodata_value is not None else out_nodata,
-                resampling=Resampling.nearest,
-            )
-            fixed_valid_reprojected = np.zeros((int(solve_height), int(solve_width)), dtype=np.uint8)
-            reproject(
-                source=fixed_valid.astype(np.uint8),
-                destination=fixed_valid_reprojected,
-                src_transform=fixed_window_transform,
-                src_crs=fixed_src.crs,
-                dst_transform=solve_transform,
-                dst_crs=fixed_src.crs,
-                src_nodata=0,
-                dst_nodata=0,
-                resampling=Resampling.nearest,
-            )
-            moving_valid_reprojected = np.zeros((int(solve_height), int(solve_width)), dtype=np.uint8)
-            reproject(
-                source=moving_valid.astype(np.uint8),
-                destination=moving_valid_reprojected,
-                src_transform=moving_window_transform,
-                src_crs=moving_src.crs,
-                dst_transform=solve_transform,
-                dst_crs=fixed_src.crs,
-                src_nodata=0,
-                dst_nodata=0,
-                resampling=Resampling.nearest,
-            )
-
-            moving_mask_for_elastix: np.ndarray
-            fixed_mask_for_elastix: np.ndarray
-            moving_on_fixed = np.full(
-                (int(solve_height), int(solve_width)),
-                moving_nodata_value if moving_nodata_value is not None else out_nodata,
-                dtype=np.float32,
-            )
-            reproject(
-                source=moving_band.astype(np.float32),
-                destination=moving_on_fixed,
-                src_transform=moving_window_transform,
-                src_crs=moving_src.crs,
-                dst_transform=solve_transform,
-                dst_crs=fixed_src.crs,
-                src_nodata=moving_nodata_value,
-                dst_nodata=moving_nodata_value if moving_nodata_value is not None else out_nodata,
-                resampling=Resampling.nearest,
-            )
-            moving_on_fixed_valid = moving_valid_reprojected > 0
-            fixed_valid = fixed_valid_reprojected > 0
+            if large_raster_mode:
+                moving_valid_reprojected = np.zeros(
+                    (int(fixed_window.height), int(fixed_window.width)),
+                    dtype=np.uint8,
+                )
+                reproject(
+                    source=moving_valid.astype(np.uint8),
+                    destination=moving_valid_reprojected,
+                    src_transform=moving_window_transform,
+                    src_crs=moving_src.crs,
+                    dst_transform=fixed_window_transform,
+                    dst_crs=fixed_src.crs,
+                    src_nodata=0,
+                    dst_nodata=0,
+                    resampling=Resampling.nearest,
+                )
+                fixed_reg_data = fixed_band.astype(np.float32)
+                moving_mask_for_elastix: np.ndarray
+                fixed_mask_for_elastix: np.ndarray
+                moving_on_fixed = np.full(
+                    (int(fixed_window.height), int(fixed_window.width)),
+                    moving_nodata_value if moving_nodata_value is not None else out_nodata,
+                    dtype=np.float32,
+                )
+                reproject(
+                    source=moving_band.astype(np.float32),
+                    destination=moving_on_fixed,
+                    src_transform=moving_window_transform,
+                    src_crs=moving_src.crs,
+                    dst_transform=fixed_window_transform,
+                    dst_crs=fixed_src.crs,
+                    src_nodata=moving_nodata_value,
+                    dst_nodata=moving_nodata_value if moving_nodata_value is not None else out_nodata,
+                    resampling=Resampling.nearest,
+                )
+                moving_on_fixed_valid = moving_valid_reprojected > 0
+                fixed_valid_for_registration = fixed_valid
+            else:
+                fixed_reg_data = np.full(
+                    (int(solve_height), int(solve_width)),
+                    fixed_nodata_value if fixed_nodata_value is not None else out_nodata,
+                    dtype=np.float32,
+                )
+                reproject(
+                    source=fixed_band.astype(np.float32),
+                    destination=fixed_reg_data,
+                    src_transform=fixed_window_transform,
+                    src_crs=fixed_src.crs,
+                    dst_transform=solve_transform,
+                    dst_crs=fixed_src.crs,
+                    src_nodata=fixed_nodata_value,
+                    dst_nodata=fixed_nodata_value if fixed_nodata_value is not None else out_nodata,
+                    resampling=Resampling.nearest,
+                )
+                fixed_valid_reprojected = np.zeros((int(solve_height), int(solve_width)), dtype=np.uint8)
+                reproject(
+                    source=fixed_valid.astype(np.uint8),
+                    destination=fixed_valid_reprojected,
+                    src_transform=fixed_window_transform,
+                    src_crs=fixed_src.crs,
+                    dst_transform=solve_transform,
+                    dst_crs=fixed_src.crs,
+                    src_nodata=0,
+                    dst_nodata=0,
+                    resampling=Resampling.nearest,
+                )
+                moving_valid_reprojected = np.zeros((int(solve_height), int(solve_width)), dtype=np.uint8)
+                reproject(
+                    source=moving_valid.astype(np.uint8),
+                    destination=moving_valid_reprojected,
+                    src_transform=moving_window_transform,
+                    src_crs=moving_src.crs,
+                    dst_transform=solve_transform,
+                    dst_crs=fixed_src.crs,
+                    src_nodata=0,
+                    dst_nodata=0,
+                    resampling=Resampling.nearest,
+                )
+                moving_mask_for_elastix: np.ndarray
+                fixed_mask_for_elastix: np.ndarray
+                moving_on_fixed = np.full(
+                    (int(solve_height), int(solve_width)),
+                    moving_nodata_value if moving_nodata_value is not None else out_nodata,
+                    dtype=np.float32,
+                )
+                reproject(
+                    source=moving_band.astype(np.float32),
+                    destination=moving_on_fixed,
+                    src_transform=moving_window_transform,
+                    src_crs=moving_src.crs,
+                    dst_transform=solve_transform,
+                    dst_crs=fixed_src.crs,
+                    src_nodata=moving_nodata_value,
+                    dst_nodata=moving_nodata_value if moving_nodata_value is not None else out_nodata,
+                    resampling=Resampling.nearest,
+                )
+                moving_on_fixed_valid = moving_valid_reprojected > 0
+                fixed_valid_for_registration = fixed_valid_reprojected > 0
             if use_edge_proxies:
-                fixed_reg_data = _edge_proxy(fixed_reg_data, fixed_valid)
+                fixed_reg_data = _edge_proxy(fixed_reg_data, fixed_valid_for_registration)
                 moving_reg_data = _edge_proxy(moving_on_fixed, moving_on_fixed_valid)
                 fixed_mask_for_elastix = (fixed_reg_data > 0).astype(np.uint8)
                 moving_mask_for_elastix = (moving_reg_data > 0).astype(np.uint8)
             else:
                 moving_reg_data = moving_on_fixed
-                fixed_mask_for_elastix = fixed_valid.astype(np.uint8)
+                fixed_mask_for_elastix = fixed_valid_for_registration.astype(np.uint8)
                 moving_mask_for_elastix = moving_on_fixed_valid.astype(np.uint8)
             if enforce_mutual_valid_mask:
                 mutual = (fixed_mask_for_elastix > 0) & (moving_mask_for_elastix > 0)
                 fixed_mask_for_elastix = mutual.astype(np.uint8)
                 moving_mask_for_elastix = mutual.astype(np.uint8)
 
-            min_valid_pixels = int(max(1, min_valid_fraction * (solve_width * solve_height)))
+            if large_raster_mode:
+                min_valid_pixels = int(max(1, min_valid_fraction * (fixed_window.width * fixed_window.height)))
+            else:
+                min_valid_pixels = int(max(1, min_valid_fraction * (solve_width * solve_height)))
             if int(fixed_mask_for_elastix.sum()) < min_valid_pixels:
                 raise ValueError("Insufficient valid fixed-image support in the registration ROI.")
             if int(moving_mask_for_elastix.sum()) < min_valid_pixels:
@@ -586,7 +1019,7 @@ def align_image_pair(
                 fixed_reg_path,
                 fixed_reg_data.astype("float32"),
                 crs=fixed_src.crs,
-                transform=solve_transform,
+                transform=fixed_window_transform if large_raster_mode else solve_transform,
                 dtype="float32",
                 nodata=fixed_nodata_value,
             )
@@ -594,7 +1027,7 @@ def align_image_pair(
                 moving_reg_path,
                 moving_reg_data.astype("float32"),
                 crs=fixed_src.crs,
-                transform=solve_transform,
+                transform=fixed_window_transform if large_raster_mode else solve_transform,
                 dtype="float32",
                 nodata=moving_nodata_value,
             )
@@ -602,7 +1035,7 @@ def align_image_pair(
                 fixed_mask_path,
                 fixed_mask_for_elastix.astype("uint8"),
                 crs=fixed_src.crs,
-                transform=solve_transform,
+                transform=fixed_window_transform if large_raster_mode else solve_transform,
                 dtype="uint8",
                 nodata=0,
             )
@@ -610,7 +1043,7 @@ def align_image_pair(
                 moving_mask_path,
                 moving_mask_for_elastix.astype("uint8"),
                 crs=fixed_src.crs,
-                transform=solve_transform,
+                transform=fixed_window_transform if large_raster_mode else solve_transform,
                 dtype="uint8",
                 nodata=0,
             )
@@ -629,7 +1062,7 @@ def align_image_pair(
             except Exception as exc:
                 raise RuntimeError(f"Elastix registration failed: {exc}") from exc
 
-            if output_on_moving_grid:
+            if output_on_moving_grid and not large_raster_mode:
                 deformation_field = deformation_field_from_transform(
                     fixed_reg_path,
                     transform_parameter_object,
@@ -638,119 +1071,17 @@ def align_image_pair(
                 fixed_dx = deformation_field[..., 0]
                 fixed_dy = deformation_field[..., 1]
 
-            if large_raster_mode and output_on_moving_grid:
-                block_width, block_height = out_dst.block_shapes[0]
-                for row_off in range(0, int(moving_window.height), int(block_height)):
-                    for col_off in range(0, int(moving_window.width), int(block_width)):
-                        win_w = min(int(block_width), int(moving_window.width) - col_off)
-                        win_h = min(int(block_height), int(moving_window.height) - row_off)
-                        block_window = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
-                        output_block_window = Window(
-                            col_off=int(moving_window.col_off + col_off),
-                            row_off=int(moving_window.row_off + row_off),
-                            width=win_w,
-                            height=win_h,
-                        )
-                        block_transform = rasterio.windows.transform(block_window, moving_window_transform)
-                        x_world, y_world = _pixel_centers_world(block_transform, win_h, win_w)
-                        solve_rows, solve_cols = _world_to_array_coords(
-                            solve_transform,
-                            x_world,
-                            y_world,
-                        )
-
-                        dx_block, dx_valid = _sample_bilinear(
-                            fixed_dx,
-                            solve_rows,
-                            solve_cols,
-                            fill_value=0.0,
-                        )
-                        dy_block, dy_valid = _sample_bilinear(
-                            fixed_dy,
-                            solve_rows,
-                            solve_cols,
-                            fill_value=0.0,
-                        )
-                        field_valid = dx_valid & dy_valid
-                        source_fixed_rows = solve_rows + dy_block
-                        source_fixed_cols = solve_cols + dx_block
-                        source_x_world, source_y_world = _array_to_world(
-                            solve_transform,
-                            source_fixed_rows,
-                            source_fixed_cols,
-                        )
-                        source_moving_rows, source_moving_cols = _world_to_array_coords(
-                            moving_src.transform,
-                            source_x_world,
-                            source_y_world,
-                        )
-
-                        if not np.any(field_valid):
-                            nodata_block = np.full((win_h, win_w), out_nodata, dtype=out_profile["dtype"])
-                            for b in range(1, moving_src.count + 1):
-                                out_dst.write(nodata_block, b, window=output_block_window)
-                            continue
-
-                        valid_source_rows = source_moving_rows[field_valid]
-                        valid_source_cols = source_moving_cols[field_valid]
-                        source_row_min = max(0, int(np.floor(float(valid_source_rows.min()))) - 1)
-                        source_col_min = max(0, int(np.floor(float(valid_source_cols.min()))) - 1)
-                        source_row_max = min(moving_src.height, int(np.ceil(float(valid_source_rows.max()))) + 2)
-                        source_col_max = min(moving_src.width, int(np.ceil(float(valid_source_cols.max()))) + 2)
-
-                        if source_row_min >= source_row_max or source_col_min >= source_col_max:
-                            nodata_block = np.full((win_h, win_w), out_nodata, dtype=out_profile["dtype"])
-                            for b in range(1, moving_src.count + 1):
-                                out_dst.write(nodata_block, b, window=output_block_window)
-                            continue
-
-                        source_window = Window(
-                            col_off=source_col_min,
-                            row_off=source_row_min,
-                            width=source_col_max - source_col_min,
-                            height=source_row_max - source_row_min,
-                        )
-                        local_source_rows = source_moving_rows - source_row_min
-                        local_source_cols = source_moving_cols - source_col_min
-
-                        for b in range(1, moving_src.count + 1):
-                            moving_band_data = moving_src.read(b, window=source_window).astype(np.float32)
-                            moving_band_valid = moving_src.read_masks(b, window=source_window).astype(np.float32)
-                            if moving_nodata_value is not None:
-                                moving_band_valid *= (moving_band_data != moving_nodata_value).astype(np.float32)
-                            remapped_block, moving_valid = _sample_bilinear(
-                                moving_band_data,
-                                local_source_rows,
-                                local_source_cols,
-                                fill_value=out_nodata,
-                            )
-                            sampled_mask, mask_valid = _sample_bilinear(
-                                moving_band_valid,
-                                local_source_rows,
-                                local_source_cols,
-                                fill_value=0.0,
-                            )
-                            valid = field_valid & moving_valid & mask_valid & (sampled_mask > 0.0)
-                            combined = np.where(valid, remapped_block, out_nodata)
-                            out_dst.write(
-                                combined.astype(out_profile["dtype"]),
-                                b,
-                                window=output_block_window,
-                            )
-
             for b in range(1, moving_src.count + 1):
                 if large_raster_mode:
-                    if output_on_moving_grid:
-                        continue
                     moving_band_path = os.path.join(work_dir, f"moving_band_{b:03d}.tif")
                     _stream_reprojected_band_to_tif(
                         moving_band_path,
                         src=moving_src,
                         band_index=b,
                         dst_crs=fixed_src.crs,
-                        dst_transform=solve_transform,
-                        dst_width=int(solve_width),
-                        dst_height=int(solve_height),
+                        dst_transform=fixed_window_transform,
+                        dst_width=int(fixed_window.width),
+                        dst_height=int(fixed_window.height),
                         src_nodata=moving_nodata_value,
                         dst_fill_value=out_nodata,
                         output_nodata=moving_nodata_value,
@@ -769,7 +1100,50 @@ def align_image_pair(
                         log_to_console=log_to_console,
                     )
                     with rasterio.open(transformed_band_path) as warped_src:
-                        if solve_width == int(fixed_window.width) and solve_height == int(fixed_window.height):
+                        if output_on_moving_grid:
+                            src_transform = warped_src.transform
+                            src_crs = warped_src.crs or fixed_src.crs
+                            aligned_window_transform = moving_window_transform
+                            block_width, block_height = out_dst.block_shapes[b - 1]
+                            for row_off in range(0, int(moving_window.height), int(block_height)):
+                                for col_off in range(0, int(moving_window.width), int(block_width)):
+                                    win_w = min(int(block_width), int(moving_window.width) - col_off)
+                                    win_h = min(int(block_height), int(moving_window.height) - row_off)
+                                    block_window = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
+                                    remapped_block = np.full(
+                                        (win_h, win_w),
+                                        out_nodata,
+                                        dtype=np.float32,
+                                    )
+                                    reproject(
+                                        source=rasterio.band(warped_src, 1),
+                                        destination=remapped_block,
+                                        src_transform=src_transform,
+                                        src_crs=src_crs,
+                                        src_nodata=out_nodata,
+                                        dst_transform=rasterio.windows.transform(block_window, aligned_window_transform),
+                                        dst_crs=moving_src.crs,
+                                        dst_nodata=out_nodata,
+                                        resampling=Resampling.bilinear,
+                                    )
+                                    source_block_window = Window(
+                                        col_off=int(moving_window.col_off + col_off),
+                                        row_off=int(moving_window.row_off + row_off),
+                                        width=win_w,
+                                        height=win_h,
+                                    )
+                                    existing_block = moving_src.read(
+                                        b,
+                                        window=source_block_window,
+                                    ).astype(np.float32)
+                                    valid = remapped_block != out_nodata
+                                    combined = np.where(valid, remapped_block, existing_block)
+                                    out_dst.write(
+                                        combined.astype(out_profile["dtype"]),
+                                        b,
+                                        window=source_block_window,
+                                    )
+                        else:
                             for _, block_window in warped_src.block_windows(1):
                                 block = warped_src.read(1, window=block_window)
                                 out_dst.write(
@@ -777,30 +1151,6 @@ def align_image_pair(
                                     b,
                                     window=block_window,
                                 )
-                        else:
-                            block_width, block_height = out_dst.block_shapes[b - 1]
-                            for row_off in range(0, int(fixed_window.height), int(block_height)):
-                                for col_off in range(0, int(fixed_window.width), int(block_width)):
-                                    win_w = min(int(block_width), int(fixed_window.width) - col_off)
-                                    win_h = min(int(block_height), int(fixed_window.height) - row_off)
-                                    block_window = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
-                                    remapped_block = np.full((win_h, win_w), out_nodata, dtype=np.float32)
-                                    reproject(
-                                        source=rasterio.band(warped_src, 1),
-                                        destination=remapped_block,
-                                        src_transform=warped_src.transform,
-                                        src_crs=warped_src.crs or fixed_src.crs,
-                                        src_nodata=out_nodata,
-                                        dst_transform=rasterio.windows.transform(block_window, fixed_window_transform),
-                                        dst_crs=fixed_src.crs,
-                                        dst_nodata=out_nodata,
-                                        resampling=Resampling.bilinear,
-                                    )
-                                    out_dst.write(
-                                        remapped_block.astype(out_profile["dtype"]),
-                                        b,
-                                        window=block_window,
-                                    )
                 else:
                     moving_band_data = moving_src.read(b, window=moving_window).astype(np.float32)
                     if output_on_moving_grid:
