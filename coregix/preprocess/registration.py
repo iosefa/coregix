@@ -4,6 +4,8 @@ import subprocess
 import sys
 from typing import Any, Optional, Sequence, Union
 
+import numpy as np
+
 
 def _require_itk():
     try:
@@ -135,6 +137,64 @@ def apply_elastix_transform(
     return output_image_path
 
 
+def apply_elastix_transform_array(
+    moving_image: np.ndarray,
+    transform_parameter_object: Any,
+    *,
+    log_to_console: bool = False,
+) -> np.ndarray:
+    """Apply a precomputed elastix transform to an in-memory image array."""
+    itk = _require_itk()
+    moving = itk.image_from_array(np.asarray(moving_image, dtype=np.float32))
+    transformed = itk.transformix_filter(
+        moving,
+        transform_parameter_object=transform_parameter_object,
+        log_to_console=log_to_console,
+    )
+    return itk.array_from_image(transformed)
+
+
+def deformation_field_from_transform(
+    reference_image_path: str,
+    transform_parameter_object: Any,
+    *,
+    output_directory: Optional[str] = None,
+) -> np.ndarray:
+    """Return the transformix deformation field as a NumPy array."""
+    itk = _require_itk()
+    reference = itk.imread(reference_image_path, itk.F)
+    kwargs = {
+        "transform_parameter_object": transform_parameter_object,
+    }
+    if output_directory is not None:
+        kwargs["output_directory"] = output_directory
+    field = itk.transformix_deformation_field(reference, **kwargs)
+    return itk.array_from_image(field)
+
+
+def deformation_field_from_transform_region(
+    transform_parameter_object: Any,
+    *,
+    row_off: int,
+    col_off: int,
+    height: int,
+    width: int,
+    output_directory: Optional[str] = None,
+) -> np.ndarray:
+    """Return a deformation field for a fixed-grid subregion."""
+    itk = _require_itk()
+    reference = itk.image_from_array(np.zeros((height, width), dtype=np.float32))
+    reference.SetOrigin((float(col_off), float(row_off)))
+    reference.SetSpacing((1.0, 1.0))
+    kwargs = {
+        "transform_parameter_object": transform_parameter_object,
+    }
+    if output_directory is not None:
+        kwargs["output_directory"] = output_directory
+    field = itk.transformix_deformation_field(reference, **kwargs)
+    return itk.array_from_image(field)
+
+
 def write_transform_parameter_files(
     transform_parameter_object: Any,
     output_prefix: str,
@@ -249,6 +309,9 @@ def run_elastix_registration(
 __all__ = [
     "estimate_elastix_transform",
     "apply_elastix_transform",
+    "apply_elastix_transform_array",
+    "deformation_field_from_transform",
+    "deformation_field_from_transform_region",
     "apply_elastix_transform_subprocess",
     "run_elastix_registration",
     "write_transform_parameter_files",

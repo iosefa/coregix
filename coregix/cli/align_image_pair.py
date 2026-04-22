@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Align a moving image (A) to a fixed image (B). "
-            "Default behavior is structural WV/LiDAR alignment on full extent."
+            "Uses edge-proxy registration on full extent by default."
         ),
     )
     parser.add_argument("--moving-image", required=True, help="Path to moving image A (will be warped).")
@@ -38,32 +38,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional 0-based fixed-image band index for registration metric.",
     )
     parser.add_argument(
-        "--no-tiling",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Disable/enable tiling (default: no tiling, full-extent registration).",
-    )
-    parser.add_argument(
-        "--tile-size",
-        type=int,
-        default=1000,
-        help="Tile size in pixels when tiling is enabled (default: 1000).",
-    )
-    parser.add_argument(
-        "--tile-buffer",
-        type=int,
-        default=100,
-        help="Buffer/overlap in pixels around each tile for registration stability (default: 100).",
-    )
-    parser.add_argument(
-        "--parameter-map",
-        default="rigid",
-        help="Elastix default parameter map (e.g., rigid, affine, bspline).",
-    )
-    parser.add_argument(
         "--parameter-file",
         action="append",
-        help="Optional elastix parameter file path. Repeat for multi-stage registration.",
+        help=(
+            "Optional elastix parameter file path. Repeat for multi-stage registration. "
+            "When omitted, the built-in translation->rigid schedule is used."
+        ),
+    )
+    parser.add_argument(
+        "--use-edge-proxies",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Use edge-proxy images rather than raw intensities for registration "
+            "(default: true)."
+        ),
+    )
+    parser.add_argument(
+        "--large-raster-mode",
+        dest="large_raster_mode",
+        action="store_true",
+        help=(
+            "Use the slower, lower-memory large-raster path with per-band "
+            "temporary TIFFs and subprocess-isolated transform application."
+        ),
+    )
+    parser.add_argument(
+        "--use-disk-band-roundtrip",
+        dest="large_raster_mode",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--moving-nodata",
@@ -84,13 +88,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-valid-fraction",
         type=float,
         default=0.01,
-        help="Minimum valid-mask fraction per tile required to run elastix (default: 0.01).",
+        help="Minimum valid-mask fraction required to run elastix (default: 0.01).",
     )
-    parser.add_argument("--temp-dir", help="Optional parent directory for temporary tile files.")
+    parser.add_argument(
+        "--solve-resolution",
+        type=float,
+        help=(
+            "Optional target pixel size, in raster CRS units, for the registration solve. "
+            "Defaults to the fixed-image ROI resolution."
+        ),
+    )
+    parser.add_argument("--temp-dir", help="Optional parent directory for temporary working files.")
     parser.add_argument(
         "--keep-temp-dir",
         action="store_true",
-        help="Keep temporary tile directory for debugging.",
+        help="Keep the temporary working directory for debugging.",
     )
     parser.add_argument(
         "--log-to-console",
@@ -121,21 +133,11 @@ def build_parser() -> argparse.ArgumentParser:
             "(default: true)."
         ),
     )
-    parser.add_argument(
-        "--registration-mode",
-        choices=["default", "structural_wv3_lidar"],
-        default="structural_wv3_lidar",
-        help=(
-            "Registration strategy. `default` uses raw bands; "
-            "`structural_wv3_lidar` mirrors the elastix-wrapper flow "
-            "(common-grid ROI + edge proxies + translation->rigid chain)."
-        ),
-    )
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """CLI entrypoint for tile-aware pairwise image alignment."""
+    """CLI entrypoint for full-extent pairwise image alignment."""
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -149,12 +151,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error("--moving-band-index must be >= 0.")
     if args.fixed_band_index is not None and args.fixed_band_index < 0:
         parser.error("--fixed-band-index must be >= 0.")
-    if args.tile_size <= 0:
-        parser.error("--tile-size must be > 0.")
-    if args.tile_buffer < 0:
-        parser.error("--tile-buffer must be >= 0.")
     if args.min_valid_fraction <= 0 or args.min_valid_fraction > 1:
         parser.error("--min-valid-fraction must be in (0, 1].")
+    if args.solve_resolution is not None and args.solve_resolution <= 0:
+        parser.error("--solve-resolution must be > 0.")
 
     result = align_image_pair(
         moving_image_path=args.moving_image,
@@ -163,10 +163,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         band_index=args.band_index,
         moving_band_index=args.moving_band_index,
         fixed_band_index=args.fixed_band_index,
-        tiling=not args.no_tiling,
-        tile_size=args.tile_size,
-        tile_buffer=args.tile_buffer,
-        parameter_map=args.parameter_map,
         parameter_file_paths=args.parameter_file,
         moving_nodata=args.moving_nodata,
         fixed_nodata=args.fixed_nodata,
@@ -178,16 +174,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         clip_fixed_to_moving=args.clip_fixed_to_moving,
         output_on_moving_grid=args.output_on_moving_grid,
         enforce_mutual_valid_mask=args.enforce_mutual_valid_mask,
-        registration_mode=args.registration_mode,
+        use_edge_proxies=args.use_edge_proxies,
+        large_raster_mode=args.large_raster_mode,
+        solve_resolution=args.solve_resolution,
     )
 
     print(
         json.dumps(
             {
                 "output_image_path": result.output_image_path,
-                "total_tiles": result.total_tiles,
-                "successful_tiles": result.successful_tiles,
-                "skipped_tiles": result.skipped_tiles,
                 "temp_dir": result.temp_dir,
             },
             indent=2,

@@ -5,3 +5,6 @@ __pycache__/
 .env
 .pytest_cache/
 .mypy_cache/
+manuscript/
+deformationField.nii
+examples/
