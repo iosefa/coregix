@@ -30,6 +30,11 @@ from create_figure2 import (
     _write_png,
 )
 
+DEFAULT_DENSE_MOVING_IMAGE = "manuscript/data/moving_dense.tif"
+DEFAULT_DENSE_FIXED_IMAGE = "manuscript/data/fixed_dense.tif"
+DEFAULT_DENSE_GCP_IMAGE = "manuscript/data/gcp_dense.tif"
+DEFAULT_DENSE_MOVING_CROWNS = "manuscript/data/crowns_moving_dense.gpkg"
+DEFAULT_DENSE_FIXED_CROWNS = "manuscript/data/crowns_fixed_dense.gpkg"
 DEFAULT_OUTPUT_SVG = "manuscript/figures/figure3_rmse_boxplot.svg"
 DEFAULT_OUTPUT_PREVIEW = "manuscript/figures/figure3_rmse_boxplot_preview.png"
 
@@ -37,8 +42,10 @@ DEFAULT_OUTPUT_PREVIEW = "manuscript/figures/figure3_rmse_boxplot_preview.png"
 @dataclass
 class MethodSeries:
     label: str
+    group: str
     color: tuple[int, int, int]
     values: np.ndarray
+    crown_ids: list[int]
 
 
 def _load_polygons_by_id(path: str, *, id_field: str = "crown_id") -> dict[int, dict]:
@@ -183,9 +190,27 @@ def _compute_method_rmse_series(
             edge_vals.append(_symmetric_boundary_rmse(fixed_mask, edge_mask) * fixed_pixel_size_m)
 
     return [
-        MethodSeries("No alignment", (110, 110, 110), np.asarray(no_alignment_vals, dtype=np.float64)),
-        MethodSeries("GCP alignment", (214, 126, 44), np.asarray(gcp_vals, dtype=np.float64)),
-        MethodSeries("Edge-proxy", (26, 140, 255), np.asarray(edge_vals, dtype=np.float64)),
+        MethodSeries(
+            "Dry Forest",
+            "Default RPC",
+            (110, 110, 110),
+            np.asarray(no_alignment_vals, dtype=np.float64),
+            list(common_ids),
+        ),
+        MethodSeries(
+            "Dry Forest",
+            "Manual GCP",
+            (214, 126, 44),
+            np.asarray(gcp_vals, dtype=np.float64),
+            list(common_ids),
+        ),
+        MethodSeries(
+            "Dry Forest",
+            "Gradient-Magnitude",
+            (26, 140, 255),
+            np.asarray(edge_vals, dtype=np.float64),
+            list(common_ids),
+        ),
     ]
 
 
@@ -197,12 +222,12 @@ def _value_to_y(value: float, *, y_min: float, y_max: float, plot_top: int, plot
 
 
 def _svg_boxplot(path: str, series_list: list[MethodSeries]) -> None:
-    width = 820
+    width = 840
     height = 520
-    margin_left = 90
-    margin_right = 36
+    margin_left = 68
+    margin_right = 16
     margin_top = 36
-    margin_bottom = 86
+    margin_bottom = 108
     plot_left = margin_left
     plot_top = margin_top
     plot_width = width - margin_left - margin_right
@@ -211,8 +236,17 @@ def _svg_boxplot(path: str, series_list: list[MethodSeries]) -> None:
     y_max = float(np.ceil((values_all.max() * 1.1) / 0.1) * 0.1)
     y_min = 0.0
     tick_step = 0.5 if y_max > 2.0 else 0.25
-    xticks = np.linspace(plot_left + plot_width / 6, plot_left + plot_width * 5 / 6, len(series_list))
-    box_width = plot_width / (len(series_list) * 5.5)
+    groups = []
+    for series in series_list:
+        if series.group not in groups:
+            groups.append(series.group)
+    group_centers = np.linspace(plot_left + plot_width * 0.22, plot_left + plot_width * 0.78, len(groups))
+    pair_offset = plot_width / 14
+    box_width = plot_width / 19
+    x_lookup: dict[tuple[str, str], float] = {}
+    for center, group in zip(group_centers, groups):
+        x_lookup[(group, "Wet Forest")] = center - pair_offset / 2
+        x_lookup[(group, "Dry Forest")] = center + pair_offset / 2
 
     body = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -221,7 +255,6 @@ def _svg_boxplot(path: str, series_list: list[MethodSeries]) -> None:
         f'<line x1="{plot_left}" y1="{plot_top}" x2="{plot_left}" y2="{plot_top + plot_height}" stroke="#222222" stroke-width="1.2"/>',
         f'<line x1="{plot_left}" y1="{plot_top + plot_height}" x2="{plot_left + plot_width}" y2="{plot_top + plot_height}" stroke="#222222" stroke-width="1.2"/>',
         f'<text x="28" y="{plot_top + plot_height / 2}" font-size="16" font-family="Helvetica, Arial, sans-serif" transform="rotate(-90 28 {plot_top + plot_height / 2})">Boundary RMSE (m)</text>',
-        f'<text x="{width / 2}" y="{height - 18}" text-anchor="middle" font-size="14" font-family="Helvetica, Arial, sans-serif" fill="#444444">n = {len(series_list[0].values)} crowns</text>',
     ]
 
     tick = y_min
@@ -231,9 +264,9 @@ def _svg_boxplot(path: str, series_list: list[MethodSeries]) -> None:
         body.append(f'<text x="{plot_left - 10}" y="{y + 5:.2f}" text-anchor="end" font-size="13" font-family="Helvetica, Arial, sans-serif" fill="#444444">{tick:.2f}</text>')
         tick += tick_step
 
-    for idx, series in enumerate(series_list):
+    for series in series_list:
         stats = _box_stats(series.values)
-        x = xticks[idx]
+        x = x_lookup[(series.group, series.label)]
         color = f"rgb({series.color[0]},{series.color[1]},{series.color[2]})"
         q1_y = _value_to_y(stats["q1"], y_min=y_min, y_max=y_max, plot_top=plot_top, plot_height=plot_height)
         q3_y = _value_to_y(stats["q3"], y_min=y_min, y_max=y_max, plot_top=plot_top, plot_height=plot_height)
@@ -266,8 +299,22 @@ def _svg_boxplot(path: str, series_list: list[MethodSeries]) -> None:
         body.append(
             f'<line x1="{x - box_width / 2:.2f}" y1="{med_y:.2f}" x2="{x + box_width / 2:.2f}" y2="{med_y:.2f}" stroke="{color}" stroke-width="3"/>'
         )
+    for center, group in zip(group_centers, groups):
         body.append(
-            f'<text x="{x:.2f}" y="{plot_top + plot_height + 28}" text-anchor="middle" font-size="14" font-family="Helvetica, Arial, sans-serif">{series.label}</text>'
+            f'<text x="{center:.2f}" y="{plot_top + plot_height + 28}" text-anchor="middle" font-size="13" font-family="Helvetica, Arial, sans-serif">{group}</text>'
+        )
+
+    legend_x = width - 245
+    legend_y = 42
+    legend_items = [
+        ("Dry Forest", "rgb(194,118,44)"),
+        ("Wet Forest", "rgb(38,132,78)"),
+    ]
+    for idx, (label, color) in enumerate(legend_items):
+        y = legend_y + idx * 24
+        body.append(f'<rect x="{legend_x}" y="{y - 10}" width="14" height="14" fill="{color}" stroke="none"/>')
+        body.append(
+            f'<text x="{legend_x + 22}" y="{y + 1}" font-size="13" font-family="Helvetica, Arial, sans-serif" fill="#333333">{label}</text>'
         )
 
     body.append("</svg>")
@@ -277,12 +324,12 @@ def _svg_boxplot(path: str, series_list: list[MethodSeries]) -> None:
 
 
 def _preview_boxplot(path: str, series_list: list[MethodSeries]) -> None:
-    width = 820
+    width = 840
     height = 520
-    margin_left = 90
-    margin_right = 36
+    margin_left = 68
+    margin_right = 16
     margin_top = 36
-    margin_bottom = 86
+    margin_bottom = 108
     plot_left = margin_left
     plot_top = margin_top
     plot_width = width - margin_left - margin_right
@@ -291,8 +338,17 @@ def _preview_boxplot(path: str, series_list: list[MethodSeries]) -> None:
     y_max = float(np.ceil((values_all.max() * 1.1) / 0.1) * 0.1)
     y_min = 0.0
     tick_step = 0.5 if y_max > 2.0 else 0.25
-    xticks = np.linspace(plot_left + plot_width / 6, plot_left + plot_width * 5 / 6, len(series_list))
-    box_width = plot_width / (len(series_list) * 5.5)
+    groups = []
+    for series in series_list:
+        if series.group not in groups:
+            groups.append(series.group)
+    group_centers = np.linspace(plot_left + plot_width * 0.22, plot_left + plot_width * 0.78, len(groups))
+    pair_offset = plot_width / 14
+    box_width = plot_width / 19
+    x_lookup: dict[tuple[str, str], int] = {}
+    for center, group in zip(group_centers, groups):
+        x_lookup[(group, "Wet Forest")] = int(round(center - pair_offset / 2))
+        x_lookup[(group, "Dry Forest")] = int(round(center + pair_offset / 2))
 
     canvas = np.full((3, height, width), 255, dtype=np.uint8)
     _draw_rect(canvas, x=plot_left, y=plot_top, width=2, height=plot_height, color=(34, 34, 34))
@@ -309,9 +365,9 @@ def _preview_boxplot(path: str, series_list: list[MethodSeries]) -> None:
     y_label = "RMSE M"
     _draw_bitmap_text(canvas, text=y_label, x=20, y=16, scale=2, color=(40, 40, 40))
 
-    for idx, series in enumerate(series_list):
+    for series in series_list:
         stats = _box_stats(series.values)
-        x = int(round(xticks[idx]))
+        x = x_lookup[(series.group, series.label)]
         color = series.color
         q1_y = int(round(_value_to_y(stats["q1"], y_min=y_min, y_max=y_max, plot_top=plot_top, plot_height=plot_height)))
         q3_y = int(round(_value_to_y(stats["q3"], y_min=y_min, y_max=y_max, plot_top=plot_top, plot_height=plot_height)))
@@ -335,16 +391,26 @@ def _preview_boxplot(path: str, series_list: list[MethodSeries]) -> None:
         _draw_rect(canvas, x=x - half_w, y=q3_y, width=2, height=max(1, q1_y - q3_y), color=color)
         _draw_rect(canvas, x=x + half_w - 1, y=q3_y, width=2, height=max(1, q1_y - q3_y), color=color)
         _draw_rect(canvas, x=x - half_w, y=med_y - 1, width=2 * half_w, height=3, color=color)
-
-        label = series.label.upper()
+    for center, group in zip(group_centers, groups):
+        label = group.upper()
         _draw_bitmap_text(
             canvas,
             text=label,
-            x=x - _bitmap_text_width(label, scale=2) // 2,
+            x=int(round(center)) - _bitmap_text_width(label, scale=2) // 2,
             y=plot_top + plot_height + 18,
             scale=2,
             color=(30, 30, 30),
         )
+    legend_x = width - 245
+    legend_y = 38
+    legend_items = [
+        ("SPARSE DRY FOREST", (194, 118, 44)),
+        ("DENSE WET FOREST", (38, 132, 78)),
+    ]
+    for idx, (label, color) in enumerate(legend_items):
+        y = legend_y + idx * 24
+        _draw_rect(canvas, x=legend_x, y=y, width=14, height=14, color=color)
+        _draw_bitmap_text(canvas, text=label, x=legend_x + 22, y=y + 1, scale=2, color=(40, 40, 40))
     _write_png(path, canvas)
 
 
@@ -355,12 +421,18 @@ def main() -> int:
     parser.add_argument("--gcp-image", default=DEFAULT_GCP_IMAGE)
     parser.add_argument("--moving-crowns", default=DEFAULT_MOVING_CROWNS)
     parser.add_argument("--fixed-crowns", default=DEFAULT_FIXED_CROWNS)
-    parser.add_argument("--moving-band-index", type=int, default=6)
+    parser.add_argument("--dense-moving-image", default=DEFAULT_DENSE_MOVING_IMAGE)
+    parser.add_argument("--dense-fixed-image", default=DEFAULT_DENSE_FIXED_IMAGE)
+    parser.add_argument("--dense-gcp-image", default=DEFAULT_DENSE_GCP_IMAGE)
+    parser.add_argument("--dense-moving-crowns", default=DEFAULT_DENSE_MOVING_CROWNS)
+    parser.add_argument("--dense-fixed-crowns", default=DEFAULT_DENSE_FIXED_CROWNS)
+    parser.add_argument("--moving-band-index", type=int, default=5)
+    parser.add_argument("--dense-moving-band-index", type=int, default=4)
     parser.add_argument("--output-svg", default=DEFAULT_OUTPUT_SVG)
     parser.add_argument("--output-preview", default=DEFAULT_OUTPUT_PREVIEW)
     args = parser.parse_args()
 
-    series_list = _compute_method_rmse_series(
+    dry_series = _compute_method_rmse_series(
         moving_image_path=args.moving_image,
         fixed_image_path=args.fixed_image,
         gcp_image_path=args.gcp_image,
@@ -368,12 +440,48 @@ def main() -> int:
         fixed_crowns_path=args.fixed_crowns,
         moving_band_index=args.moving_band_index,
     )
+    dense_series = _compute_method_rmse_series(
+        moving_image_path=args.dense_moving_image,
+        fixed_image_path=args.dense_fixed_image,
+        gcp_image_path=args.dense_gcp_image,
+        moving_crowns_path=args.dense_moving_crowns,
+        fixed_crowns_path=args.dense_fixed_crowns,
+        moving_band_index=args.dense_moving_band_index,
+    )
+    color_by_group_site = {
+        ("Default RPC", "Dry Forest"): (194, 118, 44),
+        ("Default RPC", "Wet Forest"): (38, 132, 78),
+        ("Manual GCP", "Dry Forest"): (194, 118, 44),
+        ("Manual GCP", "Wet Forest"): (38, 132, 78),
+        ("Gradient-Magnitude", "Dry Forest"): (194, 118, 44),
+        ("Gradient-Magnitude", "Wet Forest"): (38, 132, 78),
+    }
+    series_list: list[MethodSeries] = []
+    for dry, dense in zip(dry_series, dense_series):
+        series_list.append(
+            MethodSeries(
+                "Dry Forest",
+                dry.group,
+                color_by_group_site[(dry.group, "Dry Forest")],
+                dry.values,
+                dry.crown_ids,
+            )
+        )
+        series_list.append(
+            MethodSeries(
+                "Wet Forest",
+                dense.group,
+                color_by_group_site[(dense.group, "Wet Forest")],
+                dense.values,
+                dense.crown_ids,
+            )
+        )
     _svg_boxplot(args.output_svg, series_list)
     _preview_boxplot(args.output_preview, series_list)
     print(args.output_svg)
     print(args.output_preview)
     for series in series_list:
-        print(f"{series.label}: median={np.median(series.values):.3f} m, n={len(series.values)}")
+        print(f"{series.group} {series.label}: median={np.median(series.values):.3f} m, n={len(series.values)}")
     return 0
 
 

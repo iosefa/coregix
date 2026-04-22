@@ -46,6 +46,8 @@ DEFAULT_MOVING_CROWNS = "manuscript/data/crowns_moving.gpkg"
 DEFAULT_FIXED_CROWNS = "manuscript/data/crowns_fixed.gpkg"
 DEFAULT_OUTPUT_SVG = "manuscript/figures/figure2_registration_comparison.svg"
 DEFAULT_OUTPUT_PREVIEW = "manuscript/figures/figure2_registration_comparison_preview.png"
+DEFAULT_OUTPUT_SVG_WITH_LEGEND = "manuscript/figures/figure2_registration_comparison_with_legend.svg"
+DEFAULT_OUTPUT_PREVIEW_WITH_LEGEND = "manuscript/figures/figure2_registration_comparison_with_legend_preview.png"
 
 
 @dataclass
@@ -880,6 +882,7 @@ gcp_refined_rpc_orthorectification(
 def _panel_svg(panel: OverlayPanel, *, x: int, y: int, width: int, height: int) -> str:
     png_data = base64.b64encode(_png_bytes(panel.image)).decode("ascii")
     label_y = y - 14
+    title_x = x + 28
     badge = ""
     if panel.metric_text:
         badge_x = x + width - 10
@@ -895,13 +898,31 @@ def _panel_svg(panel: OverlayPanel, *, x: int, y: int, width: int, height: int) 
         )
     return (
         f'<text x="{x}" y="{label_y}" font-size="18" font-weight="700" font-family="Helvetica, Arial, sans-serif">{escape(panel.label)}</text>\n'
+        f'<text x="{title_x}" y="{label_y}" font-size="16" font-family="Helvetica, Arial, sans-serif">{escape(panel.title)}</text>\n'
         f'<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="#ffffff" stroke="#111111" stroke-width="1"/>\n'
         f'<image x="{x}" y="{y}" width="{width}" height="{height}" href="data:image/png;base64,{png_data}"/>\n'
         f'{badge}'
     )
 
 
-def _write_svg(path: str, *, panels: list[OverlayPanel], panel_width: int, panel_height: int) -> None:
+def _legend_svg(*, x: int, y: int) -> str:
+    items = [
+        ("Fixed crown boundary", "#eb871e"),
+        ("Moving crown boundary", "#0fbeeb"),
+        ("Boundary overlap", "#ffff78"),
+    ]
+    body = []
+    offsets = [0, 190, 378]
+    for (label, color), dx in zip(items, offsets):
+        xx = x + dx
+        body.append(f'<rect x="{xx}" y="{y - 10}" width="14" height="14" fill="{color}" stroke="#222222" stroke-width="0.6"/>')
+        body.append(
+            f'<text x="{xx + 22}" y="{y + 1}" font-size="13" font-family="Helvetica, Arial, sans-serif" fill="#333333">{escape(label)}</text>'
+        )
+    return "\n".join(body)
+
+
+def _write_svg(path: str, *, panels: list[OverlayPanel], panel_width: int, panel_height: int, include_legend: bool = False) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     gutter_x = 36
     gutter_y = 44
@@ -910,7 +931,8 @@ def _write_svg(path: str, *, panels: list[OverlayPanel], panel_width: int, panel
     cols = 2
     rows = int(np.ceil(len(panels) / cols))
     width = margin_left * 2 + panel_width * cols + gutter_x * (cols - 1)
-    height = margin_top + panel_height * rows + gutter_y * (rows - 1) + 24
+    legend_band = 26 if include_legend else 0
+    height = margin_top + panel_height * rows + gutter_y * (rows - 1) + 24 + legend_band
     positions = []
     for idx in range(len(panels)):
         row = idx // cols
@@ -928,18 +950,22 @@ def _write_svg(path: str, *, panels: list[OverlayPanel], panel_width: int, panel
     ]
     for panel, (x, y) in zip(panels, positions):
         body.append(_panel_svg(panel, x=x, y=y, width=panel_width, height=panel_height))
+    if include_legend:
+        legend_y = height - 12
+        body.append(_legend_svg(x=margin_left, y=legend_y))
     body.append("</svg>")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(body))
 
 
-def _build_preview(panels: list[OverlayPanel], *, panel_width: int, panel_height: int) -> np.ndarray:
+def _build_preview(panels: list[OverlayPanel], *, panel_width: int, panel_height: int, include_legend: bool = False) -> np.ndarray:
     gutter = 16
     cols = 2
     rows = int(np.ceil(len(panels) / cols))
-    label_band = 16
+    label_band = 22
+    legend_band = 24 if include_legend else 0
     canvas = np.full(
-        (3, label_band + panel_height * rows + gutter * (rows + 1), panel_width * cols + gutter * (cols + 1)),
+        (3, label_band + panel_height * rows + gutter * (rows + 1) + legend_band, panel_width * cols + gutter * (cols + 1)),
         255,
         dtype=np.uint8,
     )
@@ -956,6 +982,7 @@ def _build_preview(panels: list[OverlayPanel], *, panel_width: int, panel_height
     for panel, (top, left) in zip(panels, positions):
         canvas[:, top : top + panel_height, left : left + panel_width] = panel.image
         _draw_bitmap_text(canvas, text=panel.label, x=left, y=top - 12, scale=2)
+        _draw_bitmap_text(canvas, text=panel.title.upper(), x=left + 22, y=top - 12, scale=1, color=(30, 30, 30))
         if panel.metric_text:
             badge_w = 112
             badge_h = 20
@@ -974,6 +1001,22 @@ def _build_preview(panels: list[OverlayPanel], *, panel_width: int, panel_height
                 y=badge_y + 3,
                 scale=2,
             )
+    if include_legend:
+        base_y = canvas.shape[1] - 16
+        items = [
+            ("FIXED CROWN BOUNDARY", (235, 135, 30)),
+            ("MOVING CROWN BOUNDARY", (15, 190, 235)),
+            ("BOUNDARY OVERLAP", (255, 255, 120)),
+        ]
+        offsets = [gutter, gutter + 170, gutter + 340]
+        for (label, color), x in zip(items, offsets):
+            y = base_y
+            _draw_rect(canvas, x=x, y=y, width=10, height=10, color=color)
+            _draw_rect(canvas, x=x, y=y, width=10, height=1, color=(34, 34, 34))
+            _draw_rect(canvas, x=x, y=y + 9, width=10, height=1, color=(34, 34, 34))
+            _draw_rect(canvas, x=x, y=y, width=1, height=10, color=(34, 34, 34))
+            _draw_rect(canvas, x=x + 9, y=y, width=1, height=10, color=(34, 34, 34))
+            _draw_bitmap_text(canvas, text=label, x=x + 16, y=y + 1, scale=1, color=(40, 40, 40))
     return canvas
 
 
@@ -1189,13 +1232,13 @@ def _prepare_panels(
         if gcp_mask_full is not None:
             gcp_panel = _resize_rgb(gcp_panel_base, panel_height, panel_width)
 
-        panels = [OverlayPanel("A", "No alignment", unaligned_panel, metric_text=f"RMSE: {unaligned_boundary_m:.2f} m")]
+        panels = [OverlayPanel("A", "Default RPC", unaligned_panel, metric_text=f"RMSE: {unaligned_boundary_m:.2f} m")]
         if gcp_mask_full is not None and gcp_boundary_px is not None:
-            panels.append(OverlayPanel("B", "GCP alignment", gcp_panel, metric_text=f"RMSE: {gcp_boundary_m:.2f} m"))
+            panels.append(OverlayPanel("B", "Manual GCP", gcp_panel, metric_text=f"RMSE: {gcp_boundary_m:.2f} m"))
         panels.extend(
             [
-                OverlayPanel("C", "Raw alignment", raw_panel, metric_text=f"RMSE: {raw_boundary_m:.2f} m"),
-                OverlayPanel("D", "Edge-proxy alignment", edge_panel, metric_text=f"RMSE: {edge_boundary_m:.2f} m"),
+                OverlayPanel("C", "Raw-intensity registration", raw_panel, metric_text=f"RMSE: {raw_boundary_m:.2f} m"),
+                OverlayPanel("D", "Gradient-Magnitude registration", edge_panel, metric_text=f"RMSE: {edge_boundary_m:.2f} m"),
             ]
         )
         return panels
@@ -1217,6 +1260,7 @@ def main() -> int:
     parser.add_argument("--panel-width", type=int, default=320)
     parser.add_argument("--output-svg", default=DEFAULT_OUTPUT_SVG)
     parser.add_argument("--output-preview", default=DEFAULT_OUTPUT_PREVIEW)
+    parser.add_argument("--include-legend", action="store_true")
     parser.add_argument("--force", action="store_true", help="Retained for CLI compatibility; currently ignored.")
     args = parser.parse_args()
 
@@ -1236,8 +1280,22 @@ def main() -> int:
         force=args.force,
     )
     panel_height = panels[0].image.shape[1]
-    _write_svg(args.output_svg, panels=panels, panel_width=args.panel_width, panel_height=panel_height)
-    _write_png(args.output_preview, _build_preview(panels, panel_width=args.panel_width, panel_height=panel_height))
+    _write_svg(
+        args.output_svg,
+        panels=panels,
+        panel_width=args.panel_width,
+        panel_height=panel_height,
+        include_legend=args.include_legend,
+    )
+    _write_png(
+        args.output_preview,
+        _build_preview(
+            panels,
+            panel_width=args.panel_width,
+            panel_height=panel_height,
+            include_legend=args.include_legend,
+        ),
+    )
     print(args.output_svg)
     print(args.output_preview)
     return 0

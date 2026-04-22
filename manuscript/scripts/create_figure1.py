@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create Figure 1 comparing raw and edge-proxy optical/LiDAR imagery."""
+"""Create Figure 1 comparing raw and edge-proxy optical/lidar imagery."""
 
 from __future__ import annotations
 
@@ -234,7 +234,6 @@ def _write_svg(
     path: str,
     *,
     panels: list[Panel],
-    moving_band_index: int,
     panel_px: int = 320,
     gutter_x: int = 36,
     gutter_y: int = 44,
@@ -243,7 +242,7 @@ def _write_svg(
 ) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     width = margin_left * 2 + panel_px * 2 + gutter_x
-    height = margin_top + panel_px * 2 + gutter_y + 64
+    height = margin_top + panel_px * 2 + gutter_y + 28
     positions = [
         (margin_left, margin_top),
         (margin_left + panel_px + gutter_x, margin_top),
@@ -258,21 +257,9 @@ def _write_svg(
             f'viewBox="0 0 {width} {height}">'
         ),
         '<rect width="100%" height="100%" fill="white"/>',
-        (
-            '<text x="36" y="24" font-size="18" font-family="Helvetica, Arial, sans-serif" font-weight="700">'
-            'Figure 1. Raw optical and LiDAR intensity versus gradient magnitude'
-            "</text>"
-        ),
     ]
     for panel, (x, y) in zip(panels, positions):
         body.append(_panel_svg(panel, x=x, y=y, size=panel_px))
-    body.append(
-        (
-            f'<text x="36" y="{height - 16}" font-size="13" font-family="Helvetica, Arial, sans-serif" fill="#333333">'
-            f"Optical band {moving_band_index + 1} is resampled to the LiDAR grid. Edge-proxy images use coregix._edge_proxy exactly."
-            "</text>"
-        )
-    )
     body.append("</svg>")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(body))
@@ -308,10 +295,10 @@ def _prepare_panels(
         fixed_edge_img = _rgb_from_gray(_percentile_scale(fixed_edge_crop, mutual_crop, low=2, high=99))
 
         return [
-            Panel("A", f"Optical band {moving_band} (raw, resampled)", moving_raw_img),
-            Panel("B", "LiDAR intensity (raw)", fixed_raw_img),
+            Panel("A", f"Optical band {moving_band} intensity image", moving_raw_img),
+            Panel("B", "Lidar intensity image", fixed_raw_img),
             Panel("C", f"Optical band {moving_band} gradient magnitude", moving_edge_img),
-            Panel("D", "LiDAR gradient magnitude", fixed_edge_img),
+            Panel("D", "Lidar gradient magnitude", fixed_edge_img),
         ]
 
 
@@ -334,7 +321,6 @@ def main() -> int:
     _write_svg(
         args.output_svg,
         panels=panels,
-        moving_band_index=args.moving_band_index,
         panel_px=int(args.crop_size),
     )
     _write_png(args.output_preview, _build_preview(panels, panel_px=int(args.crop_size)))
