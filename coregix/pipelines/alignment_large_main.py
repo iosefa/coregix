@@ -14,19 +14,33 @@ from rasterio.warp import reproject
 from rasterio.windows import Window, from_bounds
 
 from coregix.preprocess.registration import (
-    apply_elastix_transform_array,
     apply_elastix_transform_subprocess,
+    deformation_field_from_transform,
     estimate_elastix_transform,
     write_transform_parameter_files,
 )
 
 DEFAULT_ALIGNMENT_PARAMETER_MAPS = ["translation", "rigid"]
+LARGE_RASTER_QUADRANT_OVERLAP_PX = 256
 
 
 @dataclass
 class AlignmentResult:
     output_image_path: str
     temp_dir: Optional[str]
+
+
+@dataclass
+class QuadrantChunk:
+    core_local_window: Window
+    chunk_local_window: Window
+    core_source_window: Window
+    chunk_source_window: Window
+    chunk_transform: object
+    fixed_chunk_window: Window
+    fixed_chunk_transform: object
+    fixed_dx: np.ndarray
+    fixed_dy: np.ndarray
 
 
 def _to_int_window(window: Window, max_width: int, max_height: int) -> Window:
@@ -142,6 +156,15 @@ def _resolve_nodata(src: rasterio.DatasetReader, override_nodata: Optional[float
     return override_nodata if override_nodata is not None else src.nodata
 
 
+def _coerce_output_nodata(dtype_name: str, nodata: float) -> float:
+    dtype = np.dtype(dtype_name)
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        if nodata < info.min or nodata > info.max:
+            return float(0)
+    return float(nodata)
+
+
 def _edge_proxy(data: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
     arr = data.astype(np.float32, copy=True)
     arr[~valid_mask] = 0.0
@@ -149,6 +172,76 @@ def _edge_proxy(data: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
     edge = np.hypot(gx, gy)
     edge[~valid_mask] = 0.0
     return edge.astype(np.float32)
+
+
+def _sample_bilinear(
+    data: np.ndarray,
+    row_coords: np.ndarray,
+    col_coords: np.ndarray,
+    *,
+    fill_value: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    height, width = data.shape
+    valid = (
+        (row_coords >= 0.0)
+        & (row_coords <= height - 1)
+        & (col_coords >= 0.0)
+        & (col_coords <= width - 1)
+    )
+    row0 = np.floor(row_coords).astype(np.int64)
+    col0 = np.floor(col_coords).astype(np.int64)
+    row1 = np.clip(row0 + 1, 0, height - 1)
+    col1 = np.clip(col0 + 1, 0, width - 1)
+    row0 = np.clip(row0, 0, height - 1)
+    col0 = np.clip(col0, 0, width - 1)
+
+    row_weight = row_coords - row0
+    col_weight = col_coords - col0
+    sampled = (
+        (1.0 - row_weight) * (1.0 - col_weight) * data[row0, col0]
+        + (1.0 - row_weight) * col_weight * data[row0, col1]
+        + row_weight * (1.0 - col_weight) * data[row1, col0]
+        + row_weight * col_weight * data[row1, col1]
+    ).astype(np.float32)
+    sampled[~valid] = fill_value
+    return sampled, valid
+
+
+def _pixel_centers_world(transform, height: int, width: int) -> tuple[np.ndarray, np.ndarray]:
+    cols = np.arange(width, dtype=np.float64) + 0.5
+    rows = np.arange(height, dtype=np.float64) + 0.5
+    col_grid, row_grid = np.meshgrid(cols, rows)
+    x_world = transform.a * col_grid + transform.b * row_grid + transform.c
+    y_world = transform.d * col_grid + transform.e * row_grid + transform.f
+    return x_world, y_world
+
+
+def _world_to_array_coords(transform, x_world: np.ndarray, y_world: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    inv = ~transform
+    center_cols = inv.a * x_world + inv.b * y_world + inv.c
+    center_rows = inv.d * x_world + inv.e * y_world + inv.f
+    return center_rows - 0.5, center_cols - 0.5
+
+
+def _array_to_world(transform, row_coords: np.ndarray, col_coords: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    center_cols = col_coords + 0.5
+    center_rows = row_coords + 0.5
+    x_world = transform.a * center_cols + transform.b * center_rows + transform.c
+    y_world = transform.d * center_cols + transform.e * center_rows + transform.f
+    return x_world, y_world
+
+
+def _expand_window(window: Window, overlap: int, max_width: int, max_height: int) -> Window:
+    return _to_int_window(
+        Window(
+            col_off=window.col_off - overlap,
+            row_off=window.row_off - overlap,
+            width=window.width + 2 * overlap,
+            height=window.height + 2 * overlap,
+        ),
+        max_width=max_width,
+        max_height=max_height,
+    )
 
 
 def align_image_pair(
@@ -219,6 +312,7 @@ def align_image_pair(
             if fixed_nodata_value is not None
             else 0
         )
+        out_nodata = _coerce_output_nodata(moving_src.dtypes[0], float(out_nodata))
 
         if clip_fixed_to_moving:
             fixed_domain_window = _to_int_window(
@@ -437,78 +531,208 @@ def align_image_pair(
             except Exception as exc:
                 raise RuntimeError(f"Elastix registration failed: {exc}") from exc
 
+            quadrant_chunks: list[QuadrantChunk] = []
+            if output_on_moving_grid:
+                moving_h = int(moving_window.height)
+                moving_w = int(moving_window.width)
+                row_splits = [0, moving_h // 2, moving_h]
+                col_splits = [0, moving_w // 2, moving_w]
+                for row_idx in range(2):
+                    for col_idx in range(2):
+                        core_local_window = Window(
+                            col_off=col_splits[col_idx],
+                            row_off=row_splits[row_idx],
+                            width=col_splits[col_idx + 1] - col_splits[col_idx],
+                            height=row_splits[row_idx + 1] - row_splits[row_idx],
+                        )
+                        if core_local_window.width <= 0 or core_local_window.height <= 0:
+                            continue
+                        chunk_local_window = _expand_window(
+                            core_local_window,
+                            LARGE_RASTER_QUADRANT_OVERLAP_PX,
+                            moving_w,
+                            moving_h,
+                        )
+                        chunk_source_window = Window(
+                            col_off=int(moving_window.col_off + chunk_local_window.col_off),
+                            row_off=int(moving_window.row_off + chunk_local_window.row_off),
+                            width=int(chunk_local_window.width),
+                            height=int(chunk_local_window.height),
+                        )
+                        core_source_window = Window(
+                            col_off=int(moving_window.col_off + core_local_window.col_off),
+                            row_off=int(moving_window.row_off + core_local_window.row_off),
+                            width=int(core_local_window.width),
+                            height=int(core_local_window.height),
+                        )
+                        chunk_transform = moving_src.window_transform(chunk_source_window)
+                        chunk_bounds = rasterio.windows.bounds(
+                            Window(0, 0, chunk_source_window.width, chunk_source_window.height),
+                            chunk_transform,
+                        )
+                        fixed_chunk_window = _to_int_window(
+                            from_bounds(
+                                left=chunk_bounds[0],
+                                bottom=chunk_bounds[1],
+                                right=chunk_bounds[2],
+                                top=chunk_bounds[3],
+                                transform=fixed_src.window_transform(fixed_window),
+                            ),
+                            max_width=int(fixed_window.width),
+                            max_height=int(fixed_window.height),
+                        )
+                        fixed_chunk_window = _expand_window(
+                            fixed_chunk_window,
+                            2,
+                            int(fixed_window.width),
+                            int(fixed_window.height),
+                        )
+                        fixed_chunk_transform = rasterio.windows.transform(
+                            fixed_chunk_window,
+                            fixed_src.window_transform(fixed_window),
+                        )
+                        fixed_chunk_ref_path = os.path.join(
+                            work_dir,
+                            f"fixed_chunk_ref_r{row_idx}_c{col_idx}.tif",
+                        )
+                        _write_single_band_tif(
+                            fixed_chunk_ref_path,
+                            np.zeros((int(fixed_chunk_window.height), int(fixed_chunk_window.width)), dtype=np.float32),
+                            crs=fixed_src.crs,
+                            transform=fixed_chunk_transform,
+                            dtype="float32",
+                            nodata=0.0,
+                        )
+                        deformation_field = deformation_field_from_transform(
+                            fixed_chunk_ref_path,
+                            transform_parameter_object,
+                            output_directory=work_dir,
+                        ).astype(np.float32)
+                        quadrant_chunks.append(
+                            QuadrantChunk(
+                                core_local_window=core_local_window,
+                                chunk_local_window=chunk_local_window,
+                                core_source_window=core_source_window,
+                                chunk_source_window=chunk_source_window,
+                                chunk_transform=chunk_transform,
+                                fixed_chunk_window=fixed_chunk_window,
+                                fixed_chunk_transform=fixed_chunk_transform,
+                                fixed_dx=deformation_field[..., 0],
+                                fixed_dy=deformation_field[..., 1],
+                            )
+                        )
+
             for b in range(1, moving_src.count + 1):
-                moving_band_path = os.path.join(work_dir, f"moving_band_{b:03d}.tif")
-                _stream_reprojected_band_to_tif(
-                    moving_band_path,
-                    src=moving_src,
-                    band_index=b,
-                    dst_crs=fixed_src.crs,
-                    dst_transform=fixed_src.window_transform(fixed_window),
-                    dst_width=int(fixed_window.width),
-                    dst_height=int(fixed_window.height),
-                    src_nodata=moving_nodata_value,
-                    dst_fill_value=out_nodata,
-                    output_nodata=moving_nodata_value,
-                )
-                if b == 1:
-                    serialized_transform_files = write_transform_parameter_files(
-                        transform_parameter_object,
-                        os.path.join(work_dir, "transform"),
-                    )
-                transformed_band_path = os.path.join(work_dir, f"warped_band_{b:03d}.tif")
-                apply_elastix_transform_subprocess(
-                    moving_image_path=moving_band_path,
-                    output_image_path=transformed_band_path,
-                    parameter_files=serialized_transform_files,
-                    reference_image_path=fixed_reg_path,
-                    log_to_console=log_to_console,
-                )
-                with rasterio.open(transformed_band_path) as warped_src:
-                    if output_on_moving_grid:
-                        src_transform = warped_src.transform
-                        src_crs = warped_src.crs or fixed_src.crs
-                        aligned_window_transform = moving_src.window_transform(moving_window)
+                if output_on_moving_grid:
+                    for chunk in quadrant_chunks:
+                        moving_band_data = moving_src.read(b, window=chunk.chunk_source_window).astype(np.float32)
+                        moving_band_valid = moving_src.read_masks(b, window=chunk.chunk_source_window).astype(np.float32)
+                        if moving_nodata_value is not None:
+                            moving_band_valid *= (moving_band_data != moving_nodata_value).astype(np.float32)
+
                         block_width, block_height = out_dst.block_shapes[b - 1]
-                        for row_off in range(0, int(moving_window.height), int(block_height)):
-                            for col_off in range(0, int(moving_window.width), int(block_width)):
-                                win_w = min(int(block_width), int(moving_window.width) - col_off)
-                                win_h = min(int(block_height), int(moving_window.height) - row_off)
-                                block_window = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
-                                remapped_block = np.full(
-                                    (win_h, win_w),
-                                    out_nodata,
-                                    dtype=np.float32,
-                                )
-                                reproject(
-                                    source=rasterio.band(warped_src, 1),
-                                    destination=remapped_block,
-                                    src_transform=src_transform,
-                                    src_crs=src_crs,
-                                    src_nodata=out_nodata,
-                                    dst_transform=rasterio.windows.transform(block_window, aligned_window_transform),
-                                    dst_crs=moving_src.crs,
-                                    dst_nodata=out_nodata,
-                                    resampling=Resampling.bilinear,
-                                )
-                                source_block_window = Window(
-                                    col_off=int(moving_window.col_off + col_off),
-                                    row_off=int(moving_window.row_off + row_off),
+                        core_row0 = int(chunk.core_local_window.row_off)
+                        core_col0 = int(chunk.core_local_window.col_off)
+                        core_row1 = core_row0 + int(chunk.core_local_window.height)
+                        core_col1 = core_col0 + int(chunk.core_local_window.width)
+                        chunk_row0 = int(chunk.chunk_local_window.row_off)
+                        chunk_col0 = int(chunk.chunk_local_window.col_off)
+
+                        for row_off in range(core_row0, core_row1, int(block_height)):
+                            for col_off in range(core_col0, core_col1, int(block_width)):
+                                win_w = min(int(block_width), core_col1 - col_off)
+                                win_h = min(int(block_height), core_row1 - row_off)
+                                global_local_block = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
+                                block_in_chunk = Window(
+                                    col_off=int(global_local_block.col_off - chunk_col0),
+                                    row_off=int(global_local_block.row_off - chunk_row0),
                                     width=win_w,
                                     height=win_h,
                                 )
-                                existing_block = moving_src.read(
-                                    b,
-                                    window=source_block_window,
-                                ).astype(np.float32)
-                                valid = remapped_block != out_nodata
-                                combined = np.where(valid, remapped_block, existing_block)
+                                block_transform = rasterio.windows.transform(block_in_chunk, chunk.chunk_transform)
+                                x_world, y_world = _pixel_centers_world(block_transform, win_h, win_w)
+                                fixed_rows, fixed_cols = _world_to_array_coords(
+                                    chunk.fixed_chunk_transform,
+                                    x_world,
+                                    y_world,
+                                )
+                                dx_block, dx_valid = _sample_bilinear(
+                                    chunk.fixed_dx,
+                                    fixed_rows,
+                                    fixed_cols,
+                                    fill_value=0.0,
+                                )
+                                dy_block, dy_valid = _sample_bilinear(
+                                    chunk.fixed_dy,
+                                    fixed_rows,
+                                    fixed_cols,
+                                    fill_value=0.0,
+                                )
+                                field_valid = dx_valid & dy_valid
+                                source_fixed_rows = fixed_rows + dy_block
+                                source_fixed_cols = fixed_cols + dx_block
+                                source_x_world, source_y_world = _array_to_world(
+                                    chunk.fixed_chunk_transform,
+                                    source_fixed_rows,
+                                    source_fixed_cols,
+                                )
+                                source_moving_rows, source_moving_cols = _world_to_array_coords(
+                                    chunk.chunk_transform,
+                                    source_x_world,
+                                    source_y_world,
+                                )
+                                remapped_block, moving_valid = _sample_bilinear(
+                                    moving_band_data,
+                                    source_moving_rows,
+                                    source_moving_cols,
+                                    fill_value=out_nodata,
+                                )
+                                sampled_mask, mask_valid = _sample_bilinear(
+                                    moving_band_valid,
+                                    source_moving_rows,
+                                    source_moving_cols,
+                                    fill_value=0.0,
+                                )
+                                valid = field_valid & moving_valid & mask_valid & (sampled_mask > 0.0)
+                                combined = np.where(valid, remapped_block, out_nodata)
                                 out_dst.write(
                                     combined.astype(out_profile["dtype"]),
                                     b,
-                                    window=source_block_window,
+                                    window=Window(
+                                        col_off=int(moving_window.col_off + global_local_block.col_off),
+                                        row_off=int(moving_window.row_off + global_local_block.row_off),
+                                        width=win_w,
+                                        height=win_h,
+                                    ),
                                 )
-                    else:
+                else:
+                    moving_band_path = os.path.join(work_dir, f"moving_band_{b:03d}.tif")
+                    _stream_reprojected_band_to_tif(
+                        moving_band_path,
+                        src=moving_src,
+                        band_index=b,
+                        dst_crs=fixed_src.crs,
+                        dst_transform=fixed_src.window_transform(fixed_window),
+                        dst_width=int(fixed_window.width),
+                        dst_height=int(fixed_window.height),
+                        src_nodata=moving_nodata_value,
+                        dst_fill_value=out_nodata,
+                        output_nodata=moving_nodata_value,
+                    )
+                    if b == 1:
+                        serialized_transform_files = write_transform_parameter_files(
+                            transform_parameter_object,
+                            os.path.join(work_dir, "transform"),
+                        )
+                    transformed_band_path = os.path.join(work_dir, f"warped_band_{b:03d}.tif")
+                    apply_elastix_transform_subprocess(
+                        moving_image_path=moving_band_path,
+                        output_image_path=transformed_band_path,
+                        parameter_files=serialized_transform_files,
+                        reference_image_path=fixed_reg_path,
+                        log_to_console=log_to_console,
+                    )
+                    with rasterio.open(transformed_band_path) as warped_src:
                         for _, block_window in warped_src.block_windows(1):
                             block = warped_src.read(1, window=block_window)
                             out_dst.write(
@@ -527,4 +751,3 @@ def align_image_pair(
         output_image_path=output_image_path,
         temp_dir=kept_temp,
     )
-
