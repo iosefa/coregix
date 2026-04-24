@@ -278,6 +278,11 @@ def align_image_pair(
     log_to_console: bool = False,
     clip_fixed_to_moving: bool = False,
     output_on_moving_grid: bool = True,
+    trim_edge_invalid: bool = False,
+    edge_trim_depth: int = 8,
+    edge_trim_detection_band_index: int = 0,
+    edge_trim_invalid_below: Optional[float] = None,
+    edge_trim_invalid_above: Optional[float] = None,
     enforce_mutual_valid_mask: bool = False,
     use_edge_proxies: bool = True,
     split_factor: int = 2,
@@ -290,6 +295,10 @@ def align_image_pair(
         raise ValueError("fixed_band_index must be >= 0 (0-based).")
     if min_valid_fraction <= 0 or min_valid_fraction > 1:
         raise ValueError("min_valid_fraction must be in (0, 1].")
+    if edge_trim_depth <= 0:
+        raise ValueError("edge_trim_depth must be > 0.")
+    if edge_trim_detection_band_index < 0:
+        raise ValueError("edge_trim_detection_band_index must be >= 0.")
     if split_factor <= 0:
         raise ValueError("split_factor must be > 0 for the chunked alignment path.")
 
@@ -752,6 +761,19 @@ def align_image_pair(
                                 b,
                                 window=block_window,
                             )
+
+        if trim_edge_invalid:
+            from coregix.postprocess import trim_edge_invalid_pixels
+
+            trim_edge_invalid_pixels(
+                input_image_path=output_image_path,
+                in_place=True,
+                edge_depth=edge_trim_depth,
+                detection_band_index=edge_trim_detection_band_index,
+                invalid_below=edge_trim_invalid_below,
+                invalid_above=edge_trim_invalid_above,
+                nodata_value=out_nodata,
+            )
 
     if temp_ctx is not None:
         temp_ctx.cleanup()

@@ -119,6 +119,40 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--trim-edge-invalid",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "After alignment, set pixels adjacent to irregular exterior invalid "
+            "boundaries to nodata (default: false)."
+        ),
+    )
+    parser.add_argument(
+        "--edge-trim-depth",
+        type=int,
+        default=8,
+        help="Number of pixels to trim inward from each exterior invalid boundary (default: 8).",
+    )
+    parser.add_argument(
+        "--edge-trim-detection-band-index",
+        type=int,
+        default=0,
+        help="0-based band index used to detect edge artifacts for --trim-edge-invalid (default: 0).",
+    )
+    parser.add_argument(
+        "--edge-trim-invalid-below",
+        type=float,
+        help=(
+            "For --trim-edge-invalid, treat values <= this threshold as invalid. "
+            "Useful for interpolation artifacts that are not exact nodata."
+        ),
+    )
+    parser.add_argument(
+        "--edge-trim-invalid-above",
+        type=float,
+        help="For --trim-edge-invalid, treat values >= this threshold as invalid.",
+    )
+    parser.add_argument(
         "--enforce-mutual-valid-mask",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -151,6 +185,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error("--solve-resolution must be > 0.")
     if args.split_factor < 0:
         parser.error("--split-factor must be >= 0.")
+    if args.edge_trim_depth <= 0:
+        parser.error("--edge-trim-depth must be > 0.")
+    if args.edge_trim_detection_band_index < 0:
+        parser.error("--edge-trim-detection-band-index must be >= 0.")
 
     result = align_image_pair(
         moving_image_path=args.moving_image,
@@ -169,6 +207,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         log_to_console=args.log_to_console,
         clip_fixed_to_moving=args.clip_fixed_to_moving,
         output_on_moving_grid=args.output_on_moving_grid,
+        trim_edge_invalid=args.trim_edge_invalid,
+        edge_trim_depth=args.edge_trim_depth,
+        edge_trim_detection_band_index=args.edge_trim_detection_band_index,
+        edge_trim_invalid_below=args.edge_trim_invalid_below,
+        edge_trim_invalid_above=args.edge_trim_invalid_above,
         enforce_mutual_valid_mask=args.enforce_mutual_valid_mask,
         use_edge_proxies=args.use_edge_proxies,
         split_factor=args.split_factor,
