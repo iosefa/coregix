@@ -28,13 +28,14 @@ classifiers = [
     "Operating System :: OS Independent"
 ]
 dependencies = [
+    "affine>=2.4",
     "numpy>=2.2",
     "rasterio>=1.4.3",
     "itk-elastix>=0.19.2"
 ]
 
 [project.urls]
-"Source" = "https://github.com/cankanoa/coregix"
+"Source" = "https://github.com/iosefa/coregix"
 
 [project.scripts]
 vhr-align-image-pair = "coregix.cli.align_image_pair:main"
