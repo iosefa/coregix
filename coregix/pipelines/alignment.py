@@ -636,6 +636,11 @@ def align_image_pair(
     log_to_console: bool = False,
     clip_fixed_to_moving: bool = False,
     output_on_moving_grid: bool = True,
+    trim_edge_invalid: bool = False,
+    edge_trim_depth: int = 8,
+    edge_trim_detection_band_index: int = 0,
+    edge_trim_invalid_below: Optional[float] = None,
+    edge_trim_invalid_above: Optional[float] = None,
     enforce_mutual_valid_mask: bool = False,
     use_edge_proxies: bool = True,
     large_raster_mode: bool = False,
@@ -667,6 +672,12 @@ def align_image_pair(
         clip_fixed_to_moving: If ``True``, restrict fixed-image domain to moving-image bounds.
         output_on_moving_grid: If ``True``, write final output on the moving-image grid
             (same transform, size, and pixel size as moving image).
+        trim_edge_invalid: If ``True``, post-process the final output by setting pixels
+            adjacent to irregular exterior invalid boundaries to nodata.
+        edge_trim_depth: Number of pixels to trim inward from each exterior invalid boundary.
+        edge_trim_detection_band_index: 0-based band used to detect edge artifacts.
+        edge_trim_invalid_below: Optional lower threshold for edge artifact detection.
+        edge_trim_invalid_above: Optional upper threshold for edge artifact detection.
         enforce_mutual_valid_mask: If ``True``, constrain both fixed and moving
             elastix masks to the mutual valid-data overlap of both images.
         use_edge_proxies: If ``True``, register on edge-proxy images rather than
@@ -691,6 +702,10 @@ def align_image_pair(
         raise ValueError("fixed_band_index must be >= 0 (0-based).")
     if min_valid_fraction <= 0 or min_valid_fraction > 1:
         raise ValueError("min_valid_fraction must be in (0, 1].")
+    if edge_trim_depth <= 0:
+        raise ValueError("edge_trim_depth must be > 0.")
+    if edge_trim_detection_band_index < 0:
+        raise ValueError("edge_trim_detection_band_index must be >= 0.")
     if large_raster_mode:
         from coregix.pipelines.alignment_large_main import (
             align_image_pair as align_image_pair_large_main,
@@ -713,6 +728,11 @@ def align_image_pair(
             log_to_console=log_to_console,
             clip_fixed_to_moving=clip_fixed_to_moving,
             output_on_moving_grid=output_on_moving_grid,
+            trim_edge_invalid=trim_edge_invalid,
+            edge_trim_depth=edge_trim_depth,
+            edge_trim_detection_band_index=edge_trim_detection_band_index,
+            edge_trim_invalid_below=edge_trim_invalid_below,
+            edge_trim_invalid_above=edge_trim_invalid_above,
             enforce_mutual_valid_mask=enforce_mutual_valid_mask,
             use_edge_proxies=use_edge_proxies,
         )
@@ -1263,6 +1283,19 @@ def align_image_pair(
                                 resampling=Resampling.bilinear,
                             )
                             out_dst.write(warped_on_fixed.astype(out_profile["dtype"]), b, window=core_out_window)
+
+        if trim_edge_invalid:
+            from coregix.postprocess import trim_edge_invalid_pixels
+
+            trim_edge_invalid_pixels(
+                input_image_path=output_image_path,
+                in_place=True,
+                edge_depth=edge_trim_depth,
+                detection_band_index=edge_trim_detection_band_index,
+                invalid_below=edge_trim_invalid_below,
+                invalid_above=edge_trim_invalid_above,
+                nodata_value=out_nodata,
+            )
 
     if temp_ctx is not None:
         temp_ctx.cleanup()
