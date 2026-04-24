@@ -55,19 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--large-raster-mode",
-        dest="large_raster_mode",
-        action="store_true",
+        "--split-factor",
+        type=int,
+        default=0,
         help=(
-            "Use the slower, lower-memory large-raster path with per-band "
-            "temporary TIFFs and subprocess-isolated transform application."
+            "Split the moving-overlap domain into 2^k chunks for chunked transform "
+            "application. 0=no split, 1=halves, 2=quadrants, 3=octants (default: 0)."
         ),
-    )
-    parser.add_argument(
-        "--use-disk-band-roundtrip",
-        dest="large_raster_mode",
-        action="store_true",
-        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--moving-nodata",
@@ -155,6 +149,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error("--min-valid-fraction must be in (0, 1].")
     if args.solve_resolution is not None and args.solve_resolution <= 0:
         parser.error("--solve-resolution must be > 0.")
+    if args.split_factor < 0:
+        parser.error("--split-factor must be >= 0.")
 
     result = align_image_pair(
         moving_image_path=args.moving_image,
@@ -175,7 +171,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         output_on_moving_grid=args.output_on_moving_grid,
         enforce_mutual_valid_mask=args.enforce_mutual_valid_mask,
         use_edge_proxies=args.use_edge_proxies,
-        large_raster_mode=args.large_raster_mode,
+        split_factor=args.split_factor,
         solve_resolution=args.solve_resolution,
     )
 

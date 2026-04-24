@@ -1,4 +1,4 @@
-"""Pairwise alignment pipeline copied from main for large-raster mode."""
+"""Chunked pairwise alignment pipeline for split-factor execution."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from coregix.preprocess.registration import (
 )
 
 DEFAULT_ALIGNMENT_PARAMETER_MAPS = ["translation", "rigid"]
-LARGE_RASTER_QUADRANT_OVERLAP_PX = 256
+CHUNK_OVERLAP_PX = 256
 
 
 @dataclass
@@ -31,13 +31,11 @@ class AlignmentResult:
 
 
 @dataclass
-class QuadrantChunk:
+class RasterChunk:
     core_local_window: Window
     chunk_local_window: Window
-    core_source_window: Window
     chunk_source_window: Window
     chunk_transform: object
-    fixed_chunk_window: Window
     fixed_chunk_transform: object
     fixed_dx: np.ndarray
     fixed_dy: np.ndarray
@@ -244,6 +242,24 @@ def _expand_window(window: Window, overlap: int, max_width: int, max_height: int
     )
 
 
+def _split_positions(length: int, parts: int) -> list[int]:
+    if parts <= 0:
+        raise ValueError("parts must be > 0.")
+    return [int(i * length // parts) for i in range(parts + 1)]
+
+
+def _chunk_grid_shape(split_factor: int, width: int, height: int) -> tuple[int, int]:
+    if split_factor < 0:
+        raise ValueError("split_factor must be >= 0.")
+    if split_factor == 0:
+        return 1, 1
+    major_exp = (split_factor + 1) // 2
+    minor_exp = split_factor // 2
+    if width >= height:
+        return 2**minor_exp, 2**major_exp
+    return 2**major_exp, 2**minor_exp
+
+
 def align_image_pair(
     moving_image_path: str,
     fixed_image_path: str,
@@ -264,6 +280,7 @@ def align_image_pair(
     output_on_moving_grid: bool = True,
     enforce_mutual_valid_mask: bool = False,
     use_edge_proxies: bool = True,
+    split_factor: int = 2,
 ) -> AlignmentResult:
     if band_index < 0:
         raise ValueError("band_index must be >= 0 (0-based).")
@@ -273,6 +290,8 @@ def align_image_pair(
         raise ValueError("fixed_band_index must be >= 0 (0-based).")
     if min_valid_fraction <= 0 or min_valid_fraction > 1:
         raise ValueError("min_valid_fraction must be in (0, 1].")
+    if split_factor <= 0:
+        raise ValueError("split_factor must be > 0 for the chunked alignment path.")
 
     temp_ctx = None
     work_dir: str
@@ -531,14 +550,15 @@ def align_image_pair(
             except Exception as exc:
                 raise RuntimeError(f"Elastix registration failed: {exc}") from exc
 
-            quadrant_chunks: list[QuadrantChunk] = []
+            raster_chunks: list[RasterChunk] = []
             if output_on_moving_grid:
                 moving_h = int(moving_window.height)
                 moving_w = int(moving_window.width)
-                row_splits = [0, moving_h // 2, moving_h]
-                col_splits = [0, moving_w // 2, moving_w]
-                for row_idx in range(2):
-                    for col_idx in range(2):
+                n_rows, n_cols = _chunk_grid_shape(split_factor, moving_w, moving_h)
+                row_splits = _split_positions(moving_h, n_rows)
+                col_splits = _split_positions(moving_w, n_cols)
+                for row_idx in range(n_rows):
+                    for col_idx in range(n_cols):
                         core_local_window = Window(
                             col_off=col_splits[col_idx],
                             row_off=row_splits[row_idx],
@@ -549,7 +569,7 @@ def align_image_pair(
                             continue
                         chunk_local_window = _expand_window(
                             core_local_window,
-                            LARGE_RASTER_QUADRANT_OVERLAP_PX,
+                            CHUNK_OVERLAP_PX,
                             moving_w,
                             moving_h,
                         )
@@ -558,12 +578,6 @@ def align_image_pair(
                             row_off=int(moving_window.row_off + chunk_local_window.row_off),
                             width=int(chunk_local_window.width),
                             height=int(chunk_local_window.height),
-                        )
-                        core_source_window = Window(
-                            col_off=int(moving_window.col_off + core_local_window.col_off),
-                            row_off=int(moving_window.row_off + core_local_window.row_off),
-                            width=int(core_local_window.width),
-                            height=int(core_local_window.height),
                         )
                         chunk_transform = moving_src.window_transform(chunk_source_window)
                         chunk_bounds = rasterio.windows.bounds(
@@ -608,14 +622,12 @@ def align_image_pair(
                             transform_parameter_object,
                             output_directory=work_dir,
                         ).astype(np.float32)
-                        quadrant_chunks.append(
-                            QuadrantChunk(
+                        raster_chunks.append(
+                            RasterChunk(
                                 core_local_window=core_local_window,
                                 chunk_local_window=chunk_local_window,
-                                core_source_window=core_source_window,
                                 chunk_source_window=chunk_source_window,
                                 chunk_transform=chunk_transform,
-                                fixed_chunk_window=fixed_chunk_window,
                                 fixed_chunk_transform=fixed_chunk_transform,
                                 fixed_dx=deformation_field[..., 0],
                                 fixed_dy=deformation_field[..., 1],
@@ -624,7 +636,7 @@ def align_image_pair(
 
             for b in range(1, moving_src.count + 1):
                 if output_on_moving_grid:
-                    for chunk in quadrant_chunks:
+                    for chunk in raster_chunks:
                         moving_band_data = moving_src.read(b, window=chunk.chunk_source_window).astype(np.float32)
                         moving_band_valid = moving_src.read_masks(b, window=chunk.chunk_source_window).astype(np.float32)
                         if moving_nodata_value is not None:
