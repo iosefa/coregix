@@ -18,7 +18,10 @@ description = "Elastix-based geospatial pairwise raster alignment"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Kanoa Lindiwe", email = "cankanoa@gmail.com"},
+    {name = "Joseph Emile Honour Percival", email = "ipercival@gmail.com"},
+    {name = "Kanoa Lindiwe", email = "cankanoa@gmail.com"}
+]
+maintainers = [
     {name = "Joseph Emile Honour Percival", email = "ipercival@gmail.com"}
 ]
 requires-python = ">=3.9"
