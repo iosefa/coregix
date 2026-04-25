@@ -1,7 +1,5 @@
 """Image registration utilities."""
 
-import subprocess
-import sys
 from typing import Any, Optional, Sequence, Union
 
 import numpy as np
@@ -22,7 +20,6 @@ def estimate_elastix_transform(
     moving_image_path: str,
     *,
     parameter_map: Union[str, Sequence[str]] = "rigid",
-    parameter_file_paths: Optional[Sequence[str]] = None,
     force_linear_resample: bool = False,
     force_nearest_resample: bool = False,
     fixed_mask_path: Optional[str] = None,
@@ -34,11 +31,8 @@ def estimate_elastix_transform(
     Args:
         fixed_image_path: Path to the fixed/reference image.
         moving_image_path: Path to the moving image to be aligned.
-        parameter_map: Default elastix parameter map name(s) if no parameter files
-            are provided. Typical values include ``"translation"``, ``"rigid"``,
-            ``"affine"``, and ``"bspline"``.
-        parameter_file_paths: Optional elastix parameter file path(s). If provided,
-            these are used instead of ``parameter_map``.
+        parameter_map: Elastix parameter map name(s). Typical values include
+            ``"translation"``, ``"rigid"``, ``"affine"``, and ``"bspline"``.
         force_linear_resample: If ``True``, enforce linear final resampling in all
             loaded parameter maps (mimics explicit wrapper settings).
         force_nearest_resample: If ``True``, enforce nearest-neighbor final
@@ -59,13 +53,9 @@ def estimate_elastix_transform(
     moving = itk.imread(moving_image_path, itk.F)
 
     parameter_object = itk.ParameterObject.New()
-    if parameter_file_paths:
-        for path in parameter_file_paths:
-            parameter_object.AddParameterMap(parameter_object.ReadParameterFile(path))
-    else:
-        map_names = [parameter_map] if isinstance(parameter_map, str) else list(parameter_map)
-        for map_name in map_names:
-            parameter_object.AddParameterMap(parameter_object.GetDefaultParameterMap(map_name))
+    map_names = [parameter_map] if isinstance(parameter_map, str) else list(parameter_map)
+    for map_name in map_names:
+        parameter_object.AddParameterMap(parameter_object.GetDefaultParameterMap(map_name))
     if force_linear_resample:
         for idx in range(int(parameter_object.GetNumberOfParameterMaps())):
             parameter_object.SetParameter(idx, "ResampleInterpolator", "FinalLinearInterpolator")
@@ -195,78 +185,12 @@ def deformation_field_from_transform_region(
     return itk.array_from_image(field)
 
 
-def write_transform_parameter_files(
-    transform_parameter_object: Any,
-    output_prefix: str,
-) -> list[str]:
-    """Write an elastix transform parameter object to parameter files."""
-    count = int(transform_parameter_object.GetNumberOfParameterMaps())
-    parameter_files = [f"{output_prefix}_{idx:03d}.txt" for idx in range(count)]
-    itk = _require_itk()
-    itk.ParameterObject.WriteParameterFiles(transform_parameter_object, parameter_files)
-    return parameter_files
-
-
-def _apply_elastix_transform_from_parameter_files(
-    moving_image_path: str,
-    output_image_path: str,
-    parameter_files: Sequence[str],
-    *,
-    reference_image_path: Optional[str] = None,
-    log_to_console: bool = False,
-) -> str:
-    """Apply transformix using serialized parameter files."""
-    itk = _require_itk()
-    parameter_object = itk.ParameterObject.New()
-    itk.ParameterObject.ReadParameterFiles(parameter_object, list(parameter_files))
-    return apply_elastix_transform(
-        moving_image_path=moving_image_path,
-        output_image_path=output_image_path,
-        transform_parameter_object=parameter_object,
-        reference_image_path=reference_image_path,
-        log_to_console=log_to_console,
-    )
-
-
-def apply_elastix_transform_subprocess(
-    moving_image_path: str,
-    output_image_path: str,
-    parameter_files: Sequence[str],
-    *,
-    reference_image_path: Optional[str] = None,
-    log_to_console: bool = False,
-) -> str:
-    """Apply transformix in a fresh Python subprocess for process isolation."""
-    command = [
-        sys.executable,
-        "-c",
-        (
-            "from coregix.preprocess.registration import "
-            "_apply_elastix_transform_from_parameter_files; "
-            "import sys; "
-            "_apply_elastix_transform_from_parameter_files("
-            "moving_image_path=sys.argv[1], "
-            "output_image_path=sys.argv[2], "
-            "parameter_files=sys.argv[3:-1], "
-            "reference_image_path=None if sys.argv[-1] == '__NONE__' else sys.argv[-1], "
-            f"log_to_console={bool(log_to_console)!r})"
-        ),
-        moving_image_path,
-        output_image_path,
-        *parameter_files,
-        reference_image_path if reference_image_path is not None else "__NONE__",
-    ]
-    subprocess.run(command, check=True)
-    return output_image_path
-
-
 def run_elastix_registration(
     fixed_image_path: str,
     moving_image_path: str,
     output_image_path: str,
     *,
     parameter_map: Union[str, Sequence[str]] = "rigid",
-    parameter_file_paths: Optional[Sequence[str]] = None,
     fixed_mask_path: Optional[str] = None,
     moving_mask_path: Optional[str] = None,
     log_to_console: bool = False,
@@ -277,10 +201,8 @@ def run_elastix_registration(
         fixed_image_path: Path to the fixed/reference image.
         moving_image_path: Path to the moving image that will be warped.
         output_image_path: Path where the registered image will be written.
-        parameter_map: Default elastix parameter map name when no parameter files are provided.
-            Common values: ``"rigid"``, ``"affine"``, ``"bspline"``.
-        parameter_file_paths: Optional parameter file path(s). When provided, these are used
-            instead of ``parameter_map``.
+        parameter_map: Elastix parameter map name(s). Common values:
+            ``"rigid"``, ``"affine"``, ``"bspline"``.
         fixed_mask_path: Optional fixed-image mask path.
         moving_mask_path: Optional moving-image mask path.
         log_to_console: Whether elastix should print logs to stdout.
@@ -292,7 +214,6 @@ def run_elastix_registration(
         fixed_image_path=fixed_image_path,
         moving_image_path=moving_image_path,
         parameter_map=parameter_map,
-        parameter_file_paths=parameter_file_paths,
         fixed_mask_path=fixed_mask_path,
         moving_mask_path=moving_mask_path,
         log_to_console=log_to_console,
@@ -312,7 +233,5 @@ __all__ = [
     "apply_elastix_transform_array",
     "deformation_field_from_transform",
     "deformation_field_from_transform_region",
-    "apply_elastix_transform_subprocess",
     "run_elastix_registration",
-    "write_transform_parameter_files",
 ]
