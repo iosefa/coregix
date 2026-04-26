@@ -13,7 +13,7 @@ coregix = ["py.typed"]
 
 [project]
 name = "coregix"
-version = "0.1.0"
+version = "0.1.1"
 description = "Elastix-based geospatial pairwise raster alignment"
 readme = "README.md"
 license = {text = "MIT"}
