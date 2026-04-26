@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 import rasterio
@@ -261,7 +261,6 @@ def align_image_pair(
     band_index: int = 0,
     moving_band_index: Optional[int] = None,
     fixed_band_index: Optional[int] = None,
-    parameter_file_paths: Optional[List[str]] = None,
     moving_nodata: Optional[float] = None,
     fixed_nodata: Optional[float] = None,
     output_nodata: Optional[float] = None,
@@ -294,8 +293,6 @@ def align_image_pair(
         fixed_image_path: Path to fixed/reference image B (target grid).
         output_image_path: Path for final aligned output image.
         band_index: 0-based band index used for registration metric.
-        parameter_file_paths: Optional elastix parameter file path(s). When omitted,
-            the built-in translation->rigid schedule is used.
         moving_nodata: Optional moving-image nodata override for mask generation.
         fixed_nodata: Optional fixed-image nodata override for mask generation.
         output_nodata: Optional output nodata override. Defaults to moving nodata,
@@ -317,8 +314,8 @@ def align_image_pair(
             elastix masks to the mutual valid-data overlap of both images.
         use_edge_proxies: If ``True``, register on edge-proxy images rather than
             raw intensities.
-        split_factor: Split the moving-overlap domain into ``2**split_factor``
-            chunks for chunked transform application. ``0`` disables chunking.
+        split_factor: Split the registration solve and final resampling domains
+            into ``2**split_factor`` chunks. ``0`` disables chunking.
         solve_resolution: Optional target pixel size, in raster CRS units, for the
             registration solve. When omitted, the fixed-image ROI resolution is used.
 
@@ -354,7 +351,6 @@ def align_image_pair(
             band_index=band_index,
             moving_band_index=moving_band_index,
             fixed_band_index=fixed_band_index,
-            parameter_file_paths=parameter_file_paths,
             moving_nodata=moving_nodata,
             fixed_nodata=fixed_nodata,
             output_nodata=output_nodata,
@@ -372,6 +368,7 @@ def align_image_pair(
             enforce_mutual_valid_mask=enforce_mutual_valid_mask,
             use_edge_proxies=use_edge_proxies,
             split_factor=split_factor,
+            solve_resolution=solve_resolution,
         )
     if solve_resolution is not None and solve_resolution <= 0:
         raise ValueError("solve_resolution must be > 0 when provided.")
@@ -664,7 +661,6 @@ def align_image_pair(
                     fixed_image_path=fixed_reg_path,
                     moving_image_path=moving_reg_path,
                     parameter_map=DEFAULT_ALIGNMENT_PARAMETER_MAPS,
-                    parameter_file_paths=parameter_file_paths,
                     force_nearest_resample=True,
                     fixed_mask_path=fixed_mask_path,
                     moving_mask_path=moving_mask_path,

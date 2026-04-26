@@ -38,14 +38,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional 0-based fixed-image band index for registration metric.",
     )
     parser.add_argument(
-        "--parameter-file",
-        action="append",
-        help=(
-            "Optional elastix parameter file path. Repeat for multi-stage registration. "
-            "When omitted, the built-in translation->rigid schedule is used."
-        ),
-    )
-    parser.add_argument(
         "--use-edge-proxies",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -59,8 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help=(
-            "Split the moving-overlap domain into 2^k chunks for chunked transform "
-            "application. 0=no split, 1=halves, 2=quadrants, 3=octants (default: 0)."
+            "Split the solve and apply domains into 2^k chunks. "
+            "0=no split, 1=halves, 2=quadrants, 3=octants (default: 0)."
         ),
     )
     parser.add_argument(
@@ -197,7 +189,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         band_index=args.band_index,
         moving_band_index=args.moving_band_index,
         fixed_band_index=args.fixed_band_index,
-        parameter_file_paths=args.parameter_file,
         moving_nodata=args.moving_nodata,
         fixed_nodata=args.fixed_nodata,
         output_nodata=args.output_nodata,
