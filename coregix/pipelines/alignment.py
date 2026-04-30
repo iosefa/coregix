@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from dataclasses import dataclass
 from typing import Optional
@@ -434,6 +435,7 @@ def align_image_pair(
             )
 
         os.makedirs(os.path.dirname(output_image_path) or ".", exist_ok=True)
+        temp_output_image_path = os.path.join(work_dir, os.path.basename(output_image_path))
         if output_on_moving_grid:
             out_profile = _make_output_profile(
                 moving_src.profile,
@@ -482,7 +484,7 @@ def align_image_pair(
             solve_resolution=solve_resolution,
         )
 
-        with rasterio.open(output_image_path, "w+", **out_profile) as out_dst:
+        with rasterio.open(temp_output_image_path, "w+", **out_profile) as out_dst:
             # Preserve radiometric/band metadata from moving image and clear stale stats
             # that can cause misleading display stretches in GIS viewers.
             try:
@@ -795,14 +797,16 @@ def align_image_pair(
             from coregix.postprocess import trim_edge_invalid_pixels
 
             trim_edge_invalid_pixels(
-                input_image_path=output_image_path,
-                in_place=True,
+                input_image_path=temp_output_image_path,
+                output_image_path=output_image_path,
                 edge_depth=edge_trim_depth,
                 detection_band_index=edge_trim_detection_band_index,
                 invalid_below=edge_trim_invalid_below,
                 invalid_above=edge_trim_invalid_above,
                 nodata_value=out_nodata,
             )
+        else:
+            shutil.copyfile(temp_output_image_path, output_image_path)
 
     if temp_ctx is not None:
         temp_ctx.cleanup()
