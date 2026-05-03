@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=False,
         help=(
-            "After alignment, set pixels adjacent to irregular exterior invalid "
+            "After alignment, set pixels adjacent to irregular invalid "
             "boundaries to nodata (default: false)."
         ),
     )
@@ -123,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--edge-trim-depth",
         type=int,
         default=8,
-        help="Number of pixels to trim inward from each exterior invalid boundary (default: 8).",
+        help="Number of pixels to trim around each invalid boundary (default: 8).",
     )
     parser.add_argument(
         "--edge-trim-detection-band-index",
