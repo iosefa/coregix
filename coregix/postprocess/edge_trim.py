@@ -168,10 +168,10 @@ def trim_edge_invalid_pixels(
 
     with tempfile.TemporaryDirectory(
         prefix="edge_trim_",
-        dir=os.path.dirname(final_path) or None,
+        dir=os.path.dirname(input_image_path) or None,
     ) as temp_dir:
         temp_output_path = os.path.join(temp_dir, os.path.basename(final_path))
-        shutil.copy2(input_image_path, temp_output_path)
+        shutil.copyfile(input_image_path, temp_output_path)
 
         pixels_trimmed = 0
         with rasterio.open(input_image_path) as src, rasterio.open(temp_output_path, "r+") as dst:
@@ -203,7 +203,10 @@ def trim_edge_invalid_pixels(
                 col_chunk_size=col_chunk_size,
             )
 
-        os.replace(temp_output_path, final_path)
+        if in_place:
+            os.replace(temp_output_path, final_path)
+        else:
+            shutil.copyfile(temp_output_path, final_path)
 
     return EdgeTrimResult(
         output_image_path=final_path,
