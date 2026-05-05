@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trim pixels adjacent to exterior invalid regions from an aligned raster."""
+"""Trim pixels adjacent to invalid regions from an aligned raster."""
 
 import argparse
 import json
@@ -13,7 +13,7 @@ from coregix.postprocess import trim_edge_invalid_pixels
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Trim a few pixels inward from irregular outer invalid boundaries in an "
+            "Trim a few pixels around irregular invalid boundaries in an "
             "already-aligned raster."
         )
     )
@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--edge-depth",
         type=int,
         default=8,
-        help="Number of valid pixels to trim inward from each exterior invalid boundary (default: 8).",
+        help="Number of valid pixels to trim around each invalid boundary (default: 8).",
     )
     parser.add_argument(
         "--detection-band-index",

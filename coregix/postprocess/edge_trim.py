@@ -1,4 +1,4 @@
-"""Trim pixels adjacent to exterior invalid regions from an aligned raster."""
+"""Trim pixels adjacent to invalid regions from an aligned raster."""
 
 from __future__ import annotations
 
@@ -40,57 +40,30 @@ def _invalid_mask(
     return invalid
 
 
-def _prefix_invalid_lengths(invalid: np.ndarray, axis: int) -> np.ndarray:
-    """Return contiguous invalid-run lengths from the low end of an axis."""
-    valid = ~invalid
-    has_valid = np.any(valid, axis=axis)
-    first_valid = np.argmax(valid, axis=axis)
-    edge_len = invalid.shape[axis]
-    return np.where(has_valid, first_valid, edge_len).astype(np.int64)
+def _dilate_mask_square(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Dilate a mask by ``radius`` pixels using a square footprint."""
+    if radius <= 0 or not np.any(mask):
+        return mask.copy()
+
+    horizontal = mask.copy()
+    for offset in range(1, radius + 1):
+        horizontal[:, offset:] |= mask[:, :-offset]
+        horizontal[:, :-offset] |= mask[:, offset:]
+
+    dilated = horizontal.copy()
+    for offset in range(1, radius + 1):
+        dilated[offset:, :] |= horizontal[:-offset, :]
+        dilated[:-offset, :] |= horizontal[offset:, :]
+
+    return dilated
 
 
-def _suffix_invalid_lengths(invalid: np.ndarray, axis: int) -> np.ndarray:
-    """Return contiguous invalid-run lengths from the high end of an axis."""
-    flipped = np.flip(invalid, axis=axis)
-    return _prefix_invalid_lengths(flipped, axis=axis)
-
-
-def _make_row_trim_mask(invalid: np.ndarray, edge_depth: int) -> np.ndarray:
-    rows, cols = invalid.shape
-    trim = np.zeros((rows, cols), dtype=bool)
-
-    left_invalid = _prefix_invalid_lengths(invalid, axis=1)
-    left_rows = np.where((left_invalid > 0) & (left_invalid < cols))[0]
-    for row in left_rows:
-        stop = min(cols, int(left_invalid[row]) + edge_depth)
-        trim[row, :stop] = True
-
-    right_invalid = _suffix_invalid_lengths(invalid, axis=1)
-    right_rows = np.where((right_invalid > 0) & (right_invalid < cols))[0]
-    for row in right_rows:
-        start = max(0, cols - int(right_invalid[row]) - edge_depth)
-        trim[row, start:] = True
-
-    return trim
-
-
-def _make_col_trim_mask(invalid: np.ndarray, edge_depth: int) -> np.ndarray:
-    rows, cols = invalid.shape
-    trim = np.zeros((rows, cols), dtype=bool)
-
-    top_invalid = _prefix_invalid_lengths(invalid, axis=0)
-    top_cols = np.where((top_invalid > 0) & (top_invalid < rows))[0]
-    for col in top_cols:
-        stop = min(rows, int(top_invalid[col]) + edge_depth)
-        trim[:stop, col] = True
-
-    bottom_invalid = _suffix_invalid_lengths(invalid, axis=0)
-    bottom_cols = np.where((bottom_invalid > 0) & (bottom_invalid < rows))[0]
-    for col in bottom_cols:
-        start = max(0, rows - int(bottom_invalid[col]) - edge_depth)
-        trim[start:, col] = True
-
-    return trim
+def _expand_window(window: Window, padding: int, max_width: int, max_height: int) -> Window:
+    col0 = max(0, int(window.col_off) - padding)
+    row0 = max(0, int(window.row_off) - padding)
+    col1 = min(max_width, int(window.col_off + window.width) + padding)
+    row1 = min(max_height, int(window.row_off + window.height) + padding)
+    return Window(col_off=col0, row_off=row0, width=col1 - col0, height=row1 - row0)
 
 
 def _apply_trim_mask(
@@ -114,6 +87,53 @@ def _apply_trim_mask(
         block[trim_mask] = nodata_value
         dst.write(block, b, window=window)
     return newly_trimmed
+
+
+def _trim_invalid_edges_windowed(
+    src: rasterio.io.DatasetReader,
+    dst: rasterio.io.DatasetWriter,
+    *,
+    detection_band: int,
+    edge_depth: int,
+    nodata_value: float,
+    invalid_below: Optional[float],
+    invalid_above: Optional[float],
+    row_chunk_size: int,
+    col_chunk_size: int,
+) -> int:
+    pixels_trimmed = 0
+    for row_off in range(0, src.height, row_chunk_size):
+        win_h = min(row_chunk_size, src.height - row_off)
+        for col_off in range(0, src.width, col_chunk_size):
+            win_w = min(col_chunk_size, src.width - col_off)
+            core_window = Window(col_off, row_off, win_w, win_h)
+            read_window = _expand_window(
+                core_window,
+                edge_depth,
+                max_width=src.width,
+                max_height=src.height,
+            )
+            detect = src.read(detection_band, window=read_window)
+            invalid = _invalid_mask(
+                detect,
+                nodata_value=nodata_value,
+                invalid_below=invalid_below,
+                invalid_above=invalid_above,
+            )
+            dilated = _dilate_mask_square(invalid, edge_depth)
+            core_row0 = int(core_window.row_off - read_window.row_off)
+            core_col0 = int(core_window.col_off - read_window.col_off)
+            trim_mask = dilated[
+                core_row0 : core_row0 + int(core_window.height),
+                core_col0 : core_col0 + int(core_window.width),
+            ]
+            pixels_trimmed += _apply_trim_mask(
+                dst,
+                window=core_window,
+                trim_mask=trim_mask,
+                nodata_value=nodata_value,
+            )
+    return pixels_trimmed
 
 
 def trim_edge_invalid_pixels(
@@ -171,41 +191,17 @@ def trim_edge_invalid_pixels(
 
             detection_band = detection_band_index + 1
 
-            for row_off in range(0, src.height, row_chunk_size):
-                win_h = min(row_chunk_size, src.height - row_off)
-                window = Window(0, row_off, src.width, win_h)
-                detect = src.read(detection_band, window=window)
-                invalid = _invalid_mask(
-                    detect,
-                    nodata_value=resolved_nodata,
-                    invalid_below=invalid_below,
-                    invalid_above=invalid_above,
-                )
-                trim_mask = _make_row_trim_mask(invalid, edge_depth=edge_depth)
-                pixels_trimmed += _apply_trim_mask(
-                    dst,
-                    window=window,
-                    trim_mask=trim_mask,
-                    nodata_value=resolved_nodata,
-                )
-
-            for col_off in range(0, src.width, col_chunk_size):
-                win_w = min(col_chunk_size, src.width - col_off)
-                window = Window(col_off, 0, win_w, src.height)
-                detect = src.read(detection_band, window=window)
-                invalid = _invalid_mask(
-                    detect,
-                    nodata_value=resolved_nodata,
-                    invalid_below=invalid_below,
-                    invalid_above=invalid_above,
-                )
-                trim_mask = _make_col_trim_mask(invalid, edge_depth=edge_depth)
-                pixels_trimmed += _apply_trim_mask(
-                    dst,
-                    window=window,
-                    trim_mask=trim_mask,
-                    nodata_value=resolved_nodata,
-                )
+            pixels_trimmed = _trim_invalid_edges_windowed(
+                src,
+                dst,
+                detection_band=detection_band,
+                edge_depth=edge_depth,
+                nodata_value=resolved_nodata,
+                invalid_below=invalid_below,
+                invalid_above=invalid_above,
+                row_chunk_size=row_chunk_size,
+                col_chunk_size=col_chunk_size,
+            )
 
         os.replace(temp_output_path, final_path)
 

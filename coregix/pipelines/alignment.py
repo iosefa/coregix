@@ -305,8 +305,8 @@ def align_image_pair(
         output_on_moving_grid: If ``True``, write final output on the moving-image grid
             (same transform, size, and pixel size as moving image).
         trim_edge_invalid: If ``True``, post-process the final output by setting pixels
-            adjacent to irregular exterior invalid boundaries to nodata.
-        edge_trim_depth: Number of pixels to trim inward from each exterior invalid boundary.
+            adjacent to irregular invalid boundaries to nodata.
+        edge_trim_depth: Number of pixels to trim around each invalid boundary.
         edge_trim_detection_band_index: 0-based band used to detect edge artifacts.
         edge_trim_invalid_below: Optional lower threshold for edge artifact detection.
         edge_trim_invalid_above: Optional upper threshold for edge artifact detection.
