@@ -123,11 +123,29 @@ def _coerce_output_nodata(dtype_name: str, nodata: float) -> float:
 
 
 def _edge_proxy(data: np.ndarray, valid_mask: np.ndarray) -> np.ndarray:
-    arr = data.astype(np.float32, copy=True)
-    arr[~valid_mask] = 0.0
-    gy, gx = np.gradient(arr)
-    edge = np.hypot(gx, gy)
-    edge[~valid_mask] = 0.0
+    arr = data.astype(np.float32, copy=False)
+    valid = valid_mask.astype(bool, copy=False)
+    edge = np.zeros(arr.shape, dtype=np.float32)
+    if not valid.any():
+        return edge
+
+    gx = np.zeros(arr.shape, dtype=np.float32)
+    gy = np.zeros(arr.shape, dtype=np.float32)
+
+    horizontal_valid = valid[:, 1:-1] & valid[:, :-2] & valid[:, 2:]
+    gx_mid = gx[:, 1:-1]
+    gx_mid[horizontal_valid] = 0.5 * (
+        arr[:, 2:][horizontal_valid] - arr[:, :-2][horizontal_valid]
+    )
+
+    vertical_valid = valid[1:-1, :] & valid[:-2, :] & valid[2:, :]
+    gy_mid = gy[1:-1, :]
+    gy_mid[vertical_valid] = 0.5 * (
+        arr[2:, :][vertical_valid] - arr[:-2, :][vertical_valid]
+    )
+
+    edge = np.hypot(gx, gy).astype(np.float32)
+    edge[~valid] = 0.0
     return edge.astype(np.float32)
 
 
@@ -498,14 +516,11 @@ def _estimate_chunk_correspondences(
 
     fixed_valid_for_registration = fixed_valid_reprojected > 0
     moving_valid_for_registration = moving_valid_reprojected > 0
+    fixed_mask_for_elastix = fixed_valid_for_registration.astype(np.uint8)
+    moving_mask_for_elastix = moving_valid_for_registration.astype(np.uint8)
     if use_edge_proxies:
         fixed_reg_data = _edge_proxy(fixed_reg_data, fixed_valid_for_registration)
         moving_reg_data = _edge_proxy(moving_reg_data, moving_valid_for_registration)
-        fixed_mask_for_elastix = (fixed_reg_data > 0).astype(np.uint8)
-        moving_mask_for_elastix = (moving_reg_data > 0).astype(np.uint8)
-    else:
-        fixed_mask_for_elastix = fixed_valid_for_registration.astype(np.uint8)
-        moving_mask_for_elastix = moving_valid_for_registration.astype(np.uint8)
     if enforce_mutual_valid_mask:
         mutual = (fixed_mask_for_elastix > 0) & (moving_mask_for_elastix > 0)
         fixed_mask_for_elastix = mutual.astype(np.uint8)
