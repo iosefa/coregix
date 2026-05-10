@@ -1,5 +1,12 @@
 # Coregix
 
+[![PyPI](https://img.shields.io/pypi/v/coregix.svg)](https://pypi.org/project/coregix/)
+[![PyPI Downloads](https://static.pepy.tech/badge/coregix)](https://pepy.tech/projects/coregix)
+[![Docker Pulls](https://img.shields.io/docker/pulls/iosefa/coregix?logo=docker&label=pulls)](https://hub.docker.com/r/iosefa/coregix)
+[![Docs](https://img.shields.io/github/actions/workflow/status/iosefa/coregix/docs.yml?branch=main&label=docs)](https://github.com/iosefa/coregix/actions/workflows/docs.yml)
+[![Contributors](https://img.shields.io/github/contributors/iosefa/coregix.svg?label=contributors)](https://github.com/iosefa/coregix/graphs/contributors)
+[![License](https://img.shields.io/github/license/iosefa/coregix)](https://github.com/iosefa/coregix/blob/main/LICENSE)
+
 **Pairwise raster coregistration for geospatial imagery.**
 
 Coregix is a Python package and command-line tool for coregistering one geospatial raster to another. It estimates a geometric transform from a source raster to a reference raster, applies that transform to the source image, and writes a coregistered GeoTIFF while preserving geospatial metadata and multi-band outputs.
