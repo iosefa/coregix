@@ -2,14 +2,14 @@
 
 ## Chunked Alignment
 
-Use `--split-factor` for large moving rasters that are expensive to transform in one pass. The value controls the number of chunks as `2 ** split_factor`.
+Use `--split-factor` for large source rasters that are expensive to transform in one pass. The value controls the number of chunks as `2 ** split_factor`.
 
 Quadrant-style execution:
 
 ```bash
 vhr-align-image-pair \
-  --moving-image /path/to/moving_large.tif \
-  --fixed-image /path/to/fixed.tif \
+  --moving-image /path/to/source_large.tif \
+  --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned_large.tif \
   --split-factor 2
 ```
@@ -20,8 +20,8 @@ Python:
 from coregix import align_image_pair
 
 result = align_image_pair(
-    moving_image_path="/path/to/moving_large.tif",
-    fixed_image_path="/path/to/fixed.tif",
+    moving_image_path="/path/to/source_large.tif",
+    fixed_image_path="/path/to/reference.tif",
     output_image_path="/path/to/aligned_large.tif",
     split_factor=2,
 )
@@ -45,8 +45,8 @@ Higher split factors create more chunks and more overhead. Use the smallest valu
 
 ```bash
 vhr-align-image-pair \
-  --moving-image moving_large.tif \
-  --fixed-image fixed.tif \
+  --moving-image source_large.tif \
+  --fixed-image reference.tif \
   --output-image aligned_large.tif \
   --split-factor 2 \
   --solve-resolution 2.0
@@ -57,5 +57,5 @@ The value is in raster CRS units. For a projected CRS in meters, `2.0` means a 2
 ## Notes
 
 - `split_factor` affects chunked solve and transform application.
-- Band metadata and descriptions are copied from the moving raster when possible.
-- Output nodata defaults to moving nodata, then fixed nodata, then `0`.
+- Band metadata and descriptions are copied from the source raster when possible.
+- Output nodata defaults to source nodata, then reference nodata, then `0`.
