@@ -23,5 +23,5 @@ RUN conda install -y -c conda-forge \
     && pip install --no-cache-dir . \
     && conda clean -afy
 
-ENTRYPOINT ["vhr-align-image-pair"]
+ENTRYPOINT ["align-image-pair"]
 CMD ["--help"]

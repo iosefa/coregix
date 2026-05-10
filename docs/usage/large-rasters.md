@@ -9,7 +9,7 @@ Chunking is controlled with `--split-factor`. The total number of chunks is `2 *
 Start without chunking. Add `--split-factor` when memory use or runtime becomes impractical:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image /path/to/source_large.tif \
   --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned_large.tif \
@@ -49,7 +49,7 @@ Higher values create more chunks and more overhead. They can also fail if indivi
 For a projected CRS in meters, `--solve-resolution 2.0` uses an approximate 2-meter solve grid:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source_large.tif \
   --fixed-image reference.tif \
   --output-image aligned_large.tif \

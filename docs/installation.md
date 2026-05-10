@@ -19,7 +19,7 @@ For most users, installing from PyPI is the right starting point.
 pip install coregix
 ```
 
-This installs the Python API and the `vhr-align-image-pair` command-line entrypoint.
+This installs the Python API and the `align-image-pair` command-line entrypoint.
 
 ## Docker
 
@@ -48,14 +48,14 @@ docker run --rm \
 
 If you built the image locally, use `coregix` instead of `iosefa/coregix:latest`.
 
-The container entrypoint is `vhr-align-image-pair`, so any CLI option can be passed directly after the image name.
+The container entrypoint is `align-image-pair`, so any CLI option can be passed directly after the image name.
 
 ## Verify The Install
 
 Check the command-line entrypoint:
 
 ```bash
-vhr-align-image-pair --help
+align-image-pair --help
 ```
 
 You can also run the CLI module directly:
