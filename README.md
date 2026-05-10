@@ -39,6 +39,29 @@ You can also run the module directly:
 python -m coregix.cli.align_image_pair --help
 ```
 
+### Docker
+
+Build the image from the repository root:
+
+```bash
+docker build -t coregix .
+```
+
+Release images are published to Docker Hub as `iosefa/coregix`.
+
+Run the CLI with a mounted data directory:
+
+```bash
+docker run --rm \
+  -v "$PWD:/data" \
+  iosefa/coregix:latest \
+  --moving-image /data/source.tif \
+  --fixed-image /data/reference.tif \
+  --output-image /data/aligned.tif
+```
+
+If you built the image locally, use `coregix` instead of `iosefa/coregix:latest`.
+
 ## CLI usage
 
 ### Coregister a source image to a reference image

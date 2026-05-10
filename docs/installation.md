@@ -21,6 +21,35 @@ pip install coregix
 
 This installs the Python API and the `vhr-align-image-pair` command-line entrypoint.
 
+## Docker
+
+Coregix can also be built and run as a Docker image:
+
+```bash
+docker build -t coregix .
+```
+
+Release images are published to Docker Hub as `iosefa/coregix`:
+
+```bash
+docker pull iosefa/coregix:latest
+```
+
+Run the alignment command by mounting a directory that contains your rasters:
+
+```bash
+docker run --rm \
+  -v "$PWD:/data" \
+  iosefa/coregix:latest \
+  --moving-image /data/source.tif \
+  --fixed-image /data/reference.tif \
+  --output-image /data/aligned.tif
+```
+
+If you built the image locally, use `coregix` instead of `iosefa/coregix:latest`.
+
+The container entrypoint is `vhr-align-image-pair`, so any CLI option can be passed directly after the image name.
+
 ## Verify The Install
 
 Check the command-line entrypoint:

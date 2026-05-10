@@ -1,4 +1,5 @@
 site_name: Coregix
+site_url: https://coregix.sefa.ai
 repo_url: https://github.com/iosefa/coregix
 
 theme:
