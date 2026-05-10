@@ -43,6 +43,12 @@ docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.26"
 ]
+test = [
+    "pytest>=7.4"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [project.urls]
 "Source" = "https://github.com/iosefa/coregix"
