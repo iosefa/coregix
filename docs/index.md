@@ -55,4 +55,4 @@ print(result.output_image_path)
 - [Align Image Pairs](usage/alignment.md): run the CLI or Python API.
 - [Large Rasters](usage/large-rasters.md): use chunked transform application.
 - [Edge Trimming](usage/edge-trimming.md): clean invalid border artifacts.
-- [API Reference](api/coregix.md): inspect generated API documentation.
+- [API Reference](api/index.md): inspect generated API documentation.

@@ -44,7 +44,7 @@ nav:
         - Large Rasters: usage/large-rasters.md
         - Edge Trimming: usage/edge-trimming.md
     - API Reference:
-        - Public API: api/coregix.md
-        - Alignment Pipeline: api/alignment.md
-        - Registration Utilities: api/registration.md
-        - Post-processing: api/postprocess.md
+        - Overview: api/index.md
+        - Alignment: api/alignment.md
+        - Edge Trimming: api/edge-trimming.md
+        - Advanced Registration: api/registration.md

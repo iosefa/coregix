@@ -1,8 +1,13 @@
 # Align Image Pairs
 
-## CLI
+This page covers the standard pairwise coregistration case: one source raster, one reference raster, and one coregistered GeoTIFF output.
 
-The main command coregisters a source raster to a reference raster:
+The CLI keeps the registration library's argument names:
+
+- `--moving-image` is the source raster that will be transformed.
+- `--fixed-image` is the reference raster used for alignment.
+
+## Basic CLI Alignment
 
 ```bash
 vhr-align-image-pair \
@@ -11,13 +16,13 @@ vhr-align-image-pair \
   --output-image /path/to/aligned.tif
 ```
 
-By default, this command:
+By default, the CLI:
 
-- registers on edge-proxy images
-- clips the reference domain to source-raster bounds
-- uses the mutual valid-data overlap for elastix masks
-- writes the coregistered output on the source-raster grid
-- applies no chunking (`--split-factor 0`)
+- estimates registration on edge-proxy images
+- clips the reference domain to the source-raster bounds
+- uses the mutual valid-data overlap for registration masks
+- writes the result on the source-raster grid
+- uses no chunking (`--split-factor 0`)
 
 The command prints a JSON summary:
 
@@ -28,7 +33,9 @@ The command prints a JSON summary:
 }
 ```
 
-## Python API
+## Basic Python Alignment
+
+The same settings can be used from Python:
 
 ```python
 from coregix import align_image_pair
@@ -37,24 +44,28 @@ result = align_image_pair(
     moving_image_path="/path/to/source.tif",
     fixed_image_path="/path/to/reference.tif",
     output_image_path="/path/to/aligned.tif",
+    clip_fixed_to_moving=True,
+    enforce_mutual_valid_mask=True,
 )
 
 print(result.output_image_path)
 ```
 
-## Band Selection
+The explicit `clip_fixed_to_moving=True` and `enforce_mutual_valid_mask=True` arguments match the CLI defaults.
 
-Use `band_index` when the same 0-based band should be used from both rasters:
+## Registration Bands
+
+Registration is estimated from one band in each raster. Use `--band-index` when the same 0-based band should be used from both rasters:
 
 ```bash
 vhr-align-image-pair \
-  --moving-image moving.tif \
-  --fixed-image fixed.tif \
+  --moving-image source.tif \
+  --fixed-image reference.tif \
   --output-image aligned.tif \
   --band-index 2
 ```
 
-Use separate source and reference band indexes when the best registration signal is in different bands:
+Use separate band indexes when the best registration signal is in different bands:
 
 ```bash
 vhr-align-image-pair \
@@ -74,8 +85,12 @@ align_image_pair(
     output_image_path="aligned.tif",
     moving_band_index=0,
     fixed_band_index=3,
+    clip_fixed_to_moving=True,
+    enforce_mutual_valid_mask=True,
 )
 ```
+
+All source bands are transformed after the registration model is estimated.
 
 ## Output Grid
 
@@ -89,7 +104,9 @@ vhr-align-image-pair \
   --output-on-moving-grid
 ```
 
-To write on the reference-raster grid:
+Use this when the aligned raster needs to remain compatible with a source image stack.
+
+Write on the reference-raster grid with:
 
 ```bash
 vhr-align-image-pair \
@@ -99,9 +116,27 @@ vhr-align-image-pair \
   --no-output-on-moving-grid
 ```
 
-## Temporary Files
+Use this when the output should match the reference raster's extent, transform, and pixel grid.
 
-Coregix creates temporary working files during registration. Keep them for debugging with:
+## Nodata Overrides
+
+Coregix reads raster masks and nodata metadata when building registration masks. If the source metadata is missing or incorrect, provide nodata values explicitly:
+
+```bash
+vhr-align-image-pair \
+  --moving-image source.tif \
+  --fixed-image reference.tif \
+  --output-image aligned.tif \
+  --moving-nodata 0 \
+  --fixed-nodata 0 \
+  --output-nodata 0
+```
+
+`--output-nodata` controls the value written into invalid output pixels.
+
+## Debugging Registration
+
+Temporary registration images and masks are normally deleted after the command finishes. Keep them when diagnosing a failed or unexpected registration:
 
 ```bash
 vhr-align-image-pair \
@@ -111,4 +146,4 @@ vhr-align-image-pair \
   --keep-temp-dir
 ```
 
-Use `--temp-dir` to choose the parent directory for those files.
+Use `--temp-dir` to choose the parent directory for temporary files, and `--log-to-console` to print registration backend logs.

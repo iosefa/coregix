@@ -1,4 +1,4 @@
-"""Standalone elastix alignment package."""
+"""Pairwise raster coregistration for geospatial imagery."""
 
 from .pipelines.alignment import AlignmentResult, align_image_pair
 
