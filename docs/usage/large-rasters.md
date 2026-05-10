@@ -26,8 +26,6 @@ result = align_image_pair(
     fixed_image_path="/path/to/reference.tif",
     output_image_path="/path/to/aligned_large.tif",
     split_factor=2,
-    clip_fixed_to_moving=True,
-    enforce_mutual_valid_mask=True,
 )
 ```
 
@@ -65,14 +63,14 @@ This can reduce registration cost for high-resolution rasters. Use a solve resol
 
 Area-based registration works best when the source and reference rasters are already close. For difficult pairs, a coarse-to-fine approach can be more reliable than a single full-resolution run.
 
-One practical pattern is:
+One practical manual pattern is:
 
 1. create lower-resolution source and reference products
 2. coregister the lower-resolution source to the lower-resolution reference
-3. use the coarse result to bring the full-resolution source closer to the reference
+3. use the coarse result to create an intermediate full-resolution source that is closer to the reference
 4. run Coregix again at full resolution to refine the alignment
 
-The first pass handles the larger residual offset on a simpler image pair. The second pass starts from a closer alignment, giving the area-based registration a better chance of converging on the fine-scale correction.
+The first pass handles the larger residual offset on a simpler image pair. The second pass starts from a closer alignment, giving the area-based registration a better chance of converging on the fine-scale correction. Coregix does not currently accept an initial transform directly; this is a two-stage processing strategy using the output from the first run as input to the second.
 
 ## Grid and Metadata Behavior
 

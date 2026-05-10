@@ -96,7 +96,7 @@ During solve-grid preparation, source and reference registration bands and masks
 
 After the transform is estimated, Coregix applies it to every band in the source raster. The final output is produced by sampling source pixels at transformed coordinates and writing the sampled values to the output grid.
 
-For normal output generation, Coregix uses bilinear sampling for raster values and masks invalid samples to nodata. This means the output is appropriate for continuous image data. For categorical rasters, class labels may be mixed by interpolation; those products should be handled with care.
+For source-grid output and chunked output, Coregix uses bilinear sampling for raster values and masks invalid samples to nodata. Reference-grid output can use the registration backend's resampling path when the solve grid matches the reference grid, and bilinear resampling when remapping from a coarser solve grid. In general, Coregix outputs are best suited to continuous image data. For categorical rasters, class labels may be mixed by interpolation; those products should be handled with care.
 
 Output nodata defaults to the source nodata value, then the reference nodata value, then `0` if neither raster declares nodata. It can be set explicitly with `--output-nodata`.
 

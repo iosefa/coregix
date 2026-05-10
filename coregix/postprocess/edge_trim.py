@@ -15,6 +15,14 @@ from rasterio.windows import Window
 
 @dataclass
 class EdgeTrimResult:
+    """Summary of edge trimming execution.
+
+    Attributes:
+        output_image_path: Path to the trimmed raster.
+        nodata_value: Nodata value used when writing trimmed pixels.
+        pixels_trimmed: Number of first-band pixels newly set to nodata.
+    """
+
     output_image_path: str
     nodata_value: float
     pixels_trimmed: int
@@ -149,6 +157,37 @@ def trim_edge_invalid_pixels(
     row_chunk_size: int = 1024,
     col_chunk_size: int = 1024,
 ) -> EdgeTrimResult:
+    """Trim pixels adjacent to invalid raster regions.
+
+    The function detects invalid pixels from a selected band, dilates that
+    invalid mask by ``edge_depth`` pixels, and writes the resolved nodata value
+    to all bands wherever the trim mask is true. It can write a new raster or
+    update the input raster in place.
+
+    Args:
+        input_image_path: Path to the raster to trim.
+        output_image_path: Optional output raster path. Required unless
+            ``in_place=True``.
+        in_place: If ``True``, overwrite ``input_image_path`` after trimming.
+        edge_depth: Number of pixels to trim around each invalid region.
+        detection_band_index: 0-based band index used to detect invalid pixels.
+        invalid_below: Optional threshold; values less than or equal to this
+            value are treated as invalid.
+        invalid_above: Optional threshold; values greater than or equal to this
+            value are treated as invalid.
+        nodata_value: Optional nodata override. Defaults to the raster's declared
+            nodata value.
+        row_chunk_size: Number of rows processed per window.
+        col_chunk_size: Number of columns processed per window.
+
+    Returns:
+        EdgeTrimResult summary with output path, nodata value, and pixel count.
+
+    Raises:
+        FileNotFoundError: If ``input_image_path`` does not exist.
+        ValueError: If arguments are inconsistent or no invalid-pixel criteria
+            are available.
+    """
     if edge_depth <= 0:
         raise ValueError("edge_depth must be > 0.")
     if detection_band_index < 0:

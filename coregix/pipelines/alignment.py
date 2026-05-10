@@ -287,59 +287,66 @@ def align_image_pair(
     temp_dir: Optional[str] = None,
     keep_temp_dir: bool = False,
     log_to_console: bool = False,
-    clip_fixed_to_moving: bool = False,
+    clip_fixed_to_moving: bool = True,
     output_on_moving_grid: bool = True,
     trim_edge_invalid: bool = False,
     edge_trim_depth: int = 8,
     edge_trim_detection_band_index: int = 0,
     edge_trim_invalid_below: Optional[float] = None,
     edge_trim_invalid_above: Optional[float] = None,
-    enforce_mutual_valid_mask: bool = False,
+    enforce_mutual_valid_mask: bool = True,
     use_edge_proxies: bool = True,
     split_factor: int = 0,
     solve_resolution: Optional[float] = None,
 ) -> AlignmentResult:
-    """Align a moving image onto a fixed image using the core elastix workflow.
+    """Coregister a source raster to a reference raster.
 
-    Transforms are estimated over the full fixed-grid ROI using a built-in
-    translation->rigid elastix schedule unless explicit parameter files are
-    provided. By default registration runs on edge-proxy images; raw intensities
-    can be used instead. The resulting transform is then applied to all
-    moving-image bands and written to the final output.
+    Coregix estimates a translation followed by a rigid transform between a
+    source raster and a reference raster. By default, registration is estimated
+    from edge-proxy images over the mutual valid-data overlap. The resulting
+    transform is applied to all source bands and written to a coregistered
+    GeoTIFF.
 
     Args:
-        moving_image_path: Path to moving image A (image to be warped).
-        fixed_image_path: Path to fixed/reference image B (target grid).
-        output_image_path: Path for final aligned output image.
-        band_index: 0-based band index used for registration metric.
-        moving_nodata: Optional moving-image nodata override for mask generation.
-        fixed_nodata: Optional fixed-image nodata override for mask generation.
-        output_nodata: Optional output nodata override. Defaults to moving nodata,
-            then fixed nodata, else ``0``.
+        moving_image_path: Path to the source raster that will be transformed.
+        fixed_image_path: Path to the reference raster used for alignment.
+        output_image_path: Path for the coregistered output raster.
+        band_index: 0-based band index used for registration when the same band
+            should be used from both rasters.
+        moving_band_index: Optional 0-based source-raster band index used for
+            registration. Overrides ``band_index`` for the source raster.
+        fixed_band_index: Optional 0-based reference-raster band index used for
+            registration. Overrides ``band_index`` for the reference raster.
+        moving_nodata: Optional source-raster nodata override for mask generation.
+        fixed_nodata: Optional reference-raster nodata override for mask generation.
+        output_nodata: Optional output nodata override. Defaults to source nodata,
+            then reference nodata, else ``0``.
         min_valid_fraction: Minimum valid-mask fraction required in the registration ROI.
         temp_dir: Optional parent directory for temporary working artifacts.
         keep_temp_dir: If ``True``, keep the temporary working directory for inspection.
-        log_to_console: If ``True``, emit elastix/transformix logs to stdout.
-        clip_fixed_to_moving: If ``True``, restrict fixed-image domain to moving-image bounds.
-        output_on_moving_grid: If ``True``, write final output on the moving-image grid
-            (same transform, size, and pixel size as moving image).
+        log_to_console: If ``True``, emit registration backend logs to stdout.
+        clip_fixed_to_moving: If ``True``, restrict the reference domain to
+            source-raster bounds.
+        output_on_moving_grid: If ``True``, write final output on the source-raster
+            grid with the same transform, dimensions, and pixel size as the source.
         trim_edge_invalid: If ``True``, post-process the final output by setting pixels
             adjacent to irregular invalid boundaries to nodata.
         edge_trim_depth: Number of pixels to trim around each invalid boundary.
         edge_trim_detection_band_index: 0-based band used to detect edge artifacts.
         edge_trim_invalid_below: Optional lower threshold for edge artifact detection.
         edge_trim_invalid_above: Optional upper threshold for edge artifact detection.
-        enforce_mutual_valid_mask: If ``True``, constrain both fixed and moving
-            elastix masks to the mutual valid-data overlap of both images.
+        enforce_mutual_valid_mask: If ``True``, constrain both registration masks
+            to the mutual valid-data overlap of source and reference rasters.
         use_edge_proxies: If ``True``, register on edge-proxy images rather than
             raw intensities.
         split_factor: Split the registration solve and final resampling domains
             into ``2**split_factor`` chunks. ``0`` disables chunking.
         solve_resolution: Optional target pixel size, in raster CRS units, for the
-            registration solve. When omitted, the fixed-image ROI resolution is used.
+            registration solve. When omitted, the reference-raster ROI resolution is used.
 
     Returns:
-        AlignmentResult summary with output path.
+        AlignmentResult summary with output path and retained temporary directory,
+        when requested.
 
     Raises:
         ValueError: If argument values are out of range or images are incompatible.
@@ -405,18 +412,18 @@ def align_image_pair(
         fixed_band_1based = (fixed_band_index if fixed_band_index is not None else band_index) + 1
         if fixed_band_1based > fixed_src.count:
             raise ValueError(
-                f"Requested fixed band index={fixed_band_1based - 1}, but fixed image has {fixed_src.count} band(s)."
+                f"Requested reference band index={fixed_band_1based - 1}, but reference raster has {fixed_src.count} band(s)."
             )
         if moving_band_1based > moving_src.count:
             raise ValueError(
-                f"Requested moving band index={moving_band_1based - 1}, but moving image has {moving_src.count} band(s)."
+                f"Requested source band index={moving_band_1based - 1}, but source raster has {moving_src.count} band(s)."
             )
         if fixed_src.crs is None or moving_src.crs is None:
-            raise ValueError("Both fixed and moving images must have CRS.")
+            raise ValueError("Both reference and source rasters must have CRS.")
         if fixed_src.crs != moving_src.crs:
             raise ValueError(
-                "Fixed and moving images must share the same CRS for tile-window extraction. "
-                f"fixed={fixed_src.crs}, moving={moving_src.crs}"
+                "Reference and source rasters must share the same CRS for tile-window extraction. "
+                f"reference={fixed_src.crs}, source={moving_src.crs}"
             )
 
         moving_nodata_value = _resolve_nodata(moving_src, moving_nodata)
@@ -445,7 +452,7 @@ def align_image_pair(
             )
             if fixed_domain_window.width <= 0 or fixed_domain_window.height <= 0:
                 raise ValueError(
-                    "No overlap between moving-image bounds and fixed-image grid."
+                    "No overlap between source-raster bounds and reference-raster grid."
                 )
         else:
             fixed_domain_window = Window(
@@ -493,7 +500,7 @@ def align_image_pair(
             max_height=moving_src.height,
         )
         if moving_window.width <= 0 or moving_window.height <= 0:
-            raise ValueError("No overlap between fixed-image ROI and moving-image grid.")
+            raise ValueError("No overlap between reference-raster ROI and source-raster grid.")
         moving_window_transform = moving_src.window_transform(moving_window)
         solve_width, solve_height, solve_transform = _resolve_solve_grid(
             base_transform=fixed_window_transform,
@@ -503,7 +510,7 @@ def align_image_pair(
         )
 
         with rasterio.open(temp_output_image_path, "w+", **out_profile) as out_dst:
-            # Preserve radiometric/band metadata from moving image and clear stale stats
+            # Preserve radiometric/band metadata from source raster and clear stale stats
             # that can cause misleading display stretches in GIS viewers.
             try:
                 out_dst.colorinterp = moving_src.colorinterp
@@ -534,7 +541,7 @@ def align_image_pair(
                 )
 
             if output_on_moving_grid:
-                # Preserve moving-image pixels outside fixed overlap domain.
+                # Preserve source-raster pixels outside the reference overlap domain.
                 for b in range(1, moving_src.count + 1):
                     for _, block_window in out_dst.block_windows(b):
                         src_block = moving_src.read(b, window=block_window)
@@ -632,9 +639,9 @@ def align_image_pair(
 
             min_valid_pixels = int(max(1, min_valid_fraction * (solve_width * solve_height)))
             if int(fixed_mask_for_elastix.sum()) < min_valid_pixels:
-                raise ValueError("Insufficient valid fixed-image support in the registration ROI.")
+                raise ValueError("Insufficient valid reference-raster support in the registration ROI.")
             if int(moving_mask_for_elastix.sum()) < min_valid_pixels:
-                raise ValueError("Insufficient valid moving-image support in the registration ROI.")
+                raise ValueError("Insufficient valid source-raster support in the registration ROI.")
 
             fixed_reg_path = os.path.join(work_dir, "fixed_reg.tif")
             moving_reg_path = os.path.join(work_dir, "moving_reg.tif")

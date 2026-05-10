@@ -26,20 +26,20 @@ def estimate_elastix_transform(
     moving_mask_path: Optional[str] = None,
     log_to_console: bool = False,
 ) -> Any:
-    """Estimate transform parameters that map a moving image to a fixed image.
+    """Estimate transform parameters that map a source image to a reference image.
 
     Args:
-        fixed_image_path: Path to the fixed/reference image.
-        moving_image_path: Path to the moving image to be aligned.
+        fixed_image_path: Path to the reference image.
+        moving_image_path: Path to the source image to be aligned.
         parameter_map: Elastix parameter map name(s). Typical values include
             ``"translation"``, ``"rigid"``, ``"affine"``, and ``"bspline"``.
         force_linear_resample: If ``True``, enforce linear final resampling in all
             loaded parameter maps (mimics explicit wrapper settings).
         force_nearest_resample: If ``True``, enforce nearest-neighbor final
             resampling in all loaded parameter maps.
-        fixed_mask_path: Optional fixed-image mask path.
-        moving_mask_path: Optional moving-image mask path.
-        log_to_console: If ``True``, emit elastix logs to stdout.
+        fixed_mask_path: Optional reference-image mask path.
+        moving_mask_path: Optional source-image mask path.
+        log_to_console: If ``True``, emit registration backend logs to stdout.
 
     Returns:
         ITK transform parameter object produced by elastix.
@@ -91,10 +91,10 @@ def apply_elastix_transform(
     reference_image_path: Optional[str] = None,
     log_to_console: bool = False,
 ) -> str:
-    """Apply a precomputed elastix transform to an image and write the result.
+    """Apply a precomputed registration transform to an image and write the result.
 
     Args:
-        moving_image_path: Path to the moving image to warp.
+        moving_image_path: Path to the source image to warp.
         output_image_path: Output path for the transformed image.
         transform_parameter_object: Transform parameter object from
             :func:`estimate_elastix_transform`.
@@ -133,7 +133,7 @@ def apply_elastix_transform_array(
     *,
     log_to_console: bool = False,
 ) -> np.ndarray:
-    """Apply a precomputed elastix transform to an in-memory image array."""
+    """Apply a precomputed registration transform to an in-memory image array."""
     itk = _require_itk()
     moving = itk.image_from_array(np.asarray(moving_image, dtype=np.float32))
     transformed = itk.transformix_filter(
@@ -195,17 +195,17 @@ def run_elastix_registration(
     moving_mask_path: Optional[str] = None,
     log_to_console: bool = False,
 ) -> str:
-    """Register a moving image to a fixed image using itk-elastix.
+    """Register a source image to a reference image using the registration backend.
 
     Args:
-        fixed_image_path: Path to the fixed/reference image.
-        moving_image_path: Path to the moving image that will be warped.
+        fixed_image_path: Path to the reference image.
+        moving_image_path: Path to the source image that will be warped.
         output_image_path: Path where the registered image will be written.
         parameter_map: Elastix parameter map name(s). Common values:
             ``"rigid"``, ``"affine"``, ``"bspline"``.
-        fixed_mask_path: Optional fixed-image mask path.
-        moving_mask_path: Optional moving-image mask path.
-        log_to_console: Whether elastix should print logs to stdout.
+        fixed_mask_path: Optional reference-image mask path.
+        moving_mask_path: Optional source-image mask path.
+        log_to_console: Whether the registration backend should print logs to stdout.
 
     Returns:
         The written ``output_image_path``.

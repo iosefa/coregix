@@ -44,14 +44,12 @@ result = align_image_pair(
     moving_image_path="/path/to/source.tif",
     fixed_image_path="/path/to/reference.tif",
     output_image_path="/path/to/aligned.tif",
-    clip_fixed_to_moving=True,
-    enforce_mutual_valid_mask=True,
 )
 
 print(result.output_image_path)
 ```
 
-The explicit `clip_fixed_to_moving=True` and `enforce_mutual_valid_mask=True` arguments match the CLI defaults.
+The CLI and Python API use the same registration defaults.
 
 ## Registration Bands
 
@@ -85,8 +83,6 @@ align_image_pair(
     output_image_path="aligned.tif",
     moving_band_index=0,
     fixed_band_index=3,
-    clip_fixed_to_moving=True,
-    enforce_mutual_valid_mask=True,
 )
 ```
 

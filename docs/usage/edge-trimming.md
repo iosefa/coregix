@@ -32,8 +32,6 @@ result = align_image_pair(
     trim_edge_invalid=True,
     edge_trim_depth=8,
     edge_trim_invalid_below=-3000,
-    clip_fixed_to_moving=True,
-    enforce_mutual_valid_mask=True,
 )
 ```
 
