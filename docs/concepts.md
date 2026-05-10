@@ -31,7 +31,7 @@ Coregix does not perform CRS reprojection as a substitute for registration. If t
 Registration is estimated from one band in each raster. By default, Coregix uses band index `0` from both rasters. Separate source and reference registration bands can be selected when the strongest registration signal is not in the same band position.
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
@@ -50,7 +50,7 @@ Edge proxies are useful when the source and reference rasters represent similar 
 Use raw values instead with:
 
 ```bash
-vhr-align-image-pair ... --no-use-edge-proxies
+align-image-pair ... --no-use-edge-proxies
 ```
 
 or in Python:
@@ -66,7 +66,7 @@ Registration should be estimated from valid image support only. Coregix builds m
 Override nodata values when the raster metadata is missing or incorrect:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
@@ -83,7 +83,7 @@ Coregix estimates the transform on a solve grid derived from the reference raste
 `--solve-resolution` can be used to estimate the transform on a coarser grid, expressed in raster CRS units:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
@@ -105,7 +105,7 @@ Output nodata defaults to the source nodata value, then the reference nodata val
 By default, Coregix writes the result on the source-raster grid. This preserves the source raster's dimensions, transform, band count, and most band metadata, while replacing pixels in the registered overlap region.
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
@@ -115,7 +115,7 @@ vhr-align-image-pair \
 Write on the reference-raster grid with:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned_on_reference_grid.tif \
@@ -144,7 +144,7 @@ Use the smallest `split_factor` that keeps processing stable. Higher values incr
 Resampling can leave invalid border artifacts around nodata regions. `--trim-edge-invalid` applies a post-processing pass that detects invalid areas and expands them by a configurable number of pixels.
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned_trimmed.tif \

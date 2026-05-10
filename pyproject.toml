@@ -54,4 +54,4 @@ testpaths = ["tests"]
 "Source" = "https://github.com/iosefa/coregix"
 
 [project.scripts]
-vhr-align-image-pair = "coregix.cli.align_image_pair:main"
+align-image-pair = "coregix.cli.align_image_pair:main"

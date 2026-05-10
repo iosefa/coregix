@@ -36,7 +36,7 @@ Large rasters can be processed in chunks. Edge cleanup is available for outputs 
 Use `--moving-image` for the source raster and `--fixed-image` for the reference raster:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image /path/to/source.tif \
   --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned.tif

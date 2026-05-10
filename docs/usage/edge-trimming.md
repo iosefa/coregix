@@ -9,7 +9,7 @@ Use edge trimming when the aligned output contains narrow border artifacts near 
 Add `--trim-edge-invalid` to run cleanup after the coregistered output is written:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image /path/to/source_large.tif \
   --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned_trimmed.tif \

@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from coregix.cli import align_image_pair as align_cli
 from coregix.cli import trim_edge_invalid as trim_cli
+
+
+def test_console_script_name_has_no_legacy_vhr_prefix() -> None:
+    pyproject = Path("pyproject.toml").read_text()
+    legacy_command = "vhr" "-align-image-pair"
+
+    assert 'align-image-pair = "coregix.cli.align_image_pair:main"' in pyproject
+    assert legacy_command not in pyproject
 
 
 def test_align_parser_defaults_use_current_registration_policy() -> None:

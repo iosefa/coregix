@@ -38,7 +38,7 @@ pip install -e .
 The installed CLI entrypoint is:
 
 ```bash
-vhr-align-image-pair --help
+align-image-pair --help
 ```
 
 You can also run the module directly:
@@ -75,7 +75,7 @@ If you built the image locally, use `coregix` instead of `iosefa/coregix:latest`
 ### Coregister a source image to a reference image
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image /path/to/source.tif \
   --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned.tif
@@ -97,7 +97,7 @@ By default this:
 Example with quadrants:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image /path/to/source_large.tif \
   --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned_large.tif \
@@ -111,7 +111,7 @@ vhr-align-image-pair \
 Example:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image /path/to/source_large.tif \
   --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned_large_edgefixed.tif \

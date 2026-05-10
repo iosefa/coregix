@@ -10,7 +10,7 @@ The CLI keeps the registration library's argument names:
 ## Basic CLI Alignment
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image /path/to/source.tif \
   --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned.tif
@@ -56,7 +56,7 @@ The CLI and Python API use the same registration defaults.
 Registration is estimated from one band in each raster. Use `--band-index` when the same 0-based band should be used from both rasters:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
@@ -66,7 +66,7 @@ vhr-align-image-pair \
 Use separate band indexes when the best registration signal is in different bands:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
@@ -93,7 +93,7 @@ All source bands are transformed after the registration model is estimated.
 The default output grid is the source-raster grid:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
@@ -105,7 +105,7 @@ Use this when the aligned raster needs to remain compatible with a source image 
 Write on the reference-raster grid with:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned_on_reference_grid.tif \
@@ -119,7 +119,7 @@ Use this when the output should match the reference raster's extent, transform, 
 Coregix reads raster masks and nodata metadata when building registration masks. If the source metadata is missing or incorrect, provide nodata values explicitly:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
@@ -135,7 +135,7 @@ vhr-align-image-pair \
 Temporary registration images and masks are normally deleted after the command finishes. Keep them when diagnosing a failed or unexpected registration:
 
 ```bash
-vhr-align-image-pair \
+align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
