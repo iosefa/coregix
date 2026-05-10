@@ -13,4 +13,4 @@ dependencies:
   - rasterio>=1.4.3
   - pip:
       - itk-elastix>=0.19.2
-      - -e .
+      - -e ".[docs]"

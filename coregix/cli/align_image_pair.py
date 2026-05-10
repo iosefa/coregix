@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Align one image (moving) to another image (fixed) using elastix."""
+"""Coregister a source raster to a reference raster."""
 
 import argparse
 import json
@@ -11,16 +11,16 @@ from coregix.pipelines.alignment import align_image_pair
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build CLI parser for pairwise image alignment."""
+    """Build CLI parser for pairwise raster coregistration."""
     parser = argparse.ArgumentParser(
         description=(
-            "Align a moving image (A) to a fixed image (B). "
-            "Uses edge-proxy registration on full extent by default."
+            "Coregister a source raster to a reference raster. "
+            "Uses edge-proxy registration by default."
         ),
     )
-    parser.add_argument("--moving-image", required=True, help="Path to moving image A (will be warped).")
-    parser.add_argument("--fixed-image", required=True, help="Path to fixed/reference image B.")
-    parser.add_argument("--output-image", required=True, help="Path to output aligned image.")
+    parser.add_argument("--moving-image", required=True, help="Path to source raster that will be transformed.")
+    parser.add_argument("--fixed-image", required=True, help="Path to reference raster used for alignment.")
+    parser.add_argument("--output-image", required=True, help="Path to output coregistered raster.")
     parser.add_argument(
         "--band-index",
         type=int,
@@ -30,20 +30,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--moving-band-index",
         type=int,
-        help="Optional 0-based moving-image band index for registration metric.",
+        help="Optional 0-based source-raster band index for registration metric.",
     )
     parser.add_argument(
         "--fixed-band-index",
         type=int,
-        help="Optional 0-based fixed-image band index for registration metric.",
+        help="Optional 0-based reference-raster band index for registration metric.",
     )
     parser.add_argument(
         "--use-edge-proxies",
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Use edge-proxy images rather than raw intensities for registration "
-            "(default: true)."
+            "Use edge-proxy images rather than raw intensities for registration."
         ),
     )
     parser.add_argument(
@@ -58,30 +57,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--moving-nodata",
         type=float,
-        help="Optional override nodata value for moving image masking.",
+        help="Optional override nodata value for source raster masking.",
     )
     parser.add_argument(
         "--fixed-nodata",
         type=float,
-        help="Optional override nodata value for fixed image masking.",
+        help="Optional override nodata value for reference raster masking.",
     )
     parser.add_argument(
         "--output-nodata",
         type=float,
-        help="Optional output nodata value. Defaults to moving nodata, then fixed nodata, else 0.",
+        help="Optional output nodata value. Defaults to source nodata, then reference nodata, else 0.",
     )
     parser.add_argument(
         "--min-valid-fraction",
         type=float,
         default=0.01,
-        help="Minimum valid-mask fraction required to run elastix (default: 0.01).",
+        help="Minimum valid-mask fraction required to run registration (default: 0.01).",
     )
     parser.add_argument(
         "--solve-resolution",
         type=float,
         help=(
             "Optional target pixel size, in raster CRS units, for the registration solve. "
-            "Defaults to the fixed-image ROI resolution."
+            "Defaults to the reference-raster ROI resolution."
         ),
     )
     parser.add_argument("--temp-dir", help="Optional parent directory for temporary working files.")
@@ -93,21 +92,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--log-to-console",
         action="store_true",
-        help="Enable verbose elastix logging.",
+        help="Enable verbose registration backend logging.",
     )
     parser.add_argument(
         "--clip-fixed-to-moving",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Clip fixed image domain to moving-image bounds before alignment (default: enabled).",
+        help="Clip reference domain to source-raster bounds before alignment.",
     )
     parser.add_argument(
         "--output-on-moving-grid",
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Write aligned output on the moving-image grid (default: true). "
-            "Disable with --no-output-on-moving-grid to write on fixed-image grid."
+            "Write coregistered output on the source-raster grid. Disable with "
+            "--no-output-on-moving-grid to write on the reference-raster grid."
         ),
     )
     parser.add_argument(
@@ -116,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "After alignment, set pixels adjacent to irregular invalid "
-            "boundaries to nodata (default: false)."
+            "boundaries to nodata."
         ),
     )
     parser.add_argument(
@@ -149,15 +148,15 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Use only pixels valid in both fixed and moving images for both elastix masks "
-            "(default: true)."
+            "Use only pixels valid in both source and reference rasters for both registration masks "
+            "during alignment."
         ),
     )
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """CLI entrypoint for full-extent pairwise image alignment."""
+    """CLI entrypoint for pairwise raster coregistration."""
     parser = build_parser()
     args = parser.parse_args(argv)
 

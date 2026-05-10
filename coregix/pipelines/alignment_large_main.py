@@ -623,14 +623,14 @@ def align_image_pair(
     temp_dir: Optional[str] = None,
     keep_temp_dir: bool = False,
     log_to_console: bool = False,
-    clip_fixed_to_moving: bool = False,
+    clip_fixed_to_moving: bool = True,
     output_on_moving_grid: bool = True,
     trim_edge_invalid: bool = False,
     edge_trim_depth: int = 8,
     edge_trim_detection_band_index: int = 0,
     edge_trim_invalid_below: Optional[float] = None,
     edge_trim_invalid_above: Optional[float] = None,
-    enforce_mutual_valid_mask: bool = False,
+    enforce_mutual_valid_mask: bool = True,
     use_edge_proxies: bool = True,
     split_factor: int = 2,
     solve_resolution: Optional[float] = None,
@@ -664,18 +664,18 @@ def align_image_pair(
         fixed_band_1based = (fixed_band_index if fixed_band_index is not None else band_index) + 1
         if fixed_band_1based > fixed_src.count:
             raise ValueError(
-                f"Requested fixed band index={fixed_band_1based - 1}, but fixed image has {fixed_src.count} band(s)."
+                f"Requested reference band index={fixed_band_1based - 1}, but reference raster has {fixed_src.count} band(s)."
             )
         if moving_band_1based > moving_src.count:
             raise ValueError(
-                f"Requested moving band index={moving_band_1based - 1}, but moving image has {moving_src.count} band(s)."
+                f"Requested source band index={moving_band_1based - 1}, but source raster has {moving_src.count} band(s)."
             )
         if fixed_src.crs is None or moving_src.crs is None:
-            raise ValueError("Both fixed and moving images must have CRS.")
+            raise ValueError("Both reference and source rasters must have CRS.")
         if fixed_src.crs != moving_src.crs:
             raise ValueError(
-                "Fixed and moving images must share the same CRS for tile-window extraction. "
-                f"fixed={fixed_src.crs}, moving={moving_src.crs}"
+                "Reference and source rasters must share the same CRS for tile-window extraction. "
+                f"reference={fixed_src.crs}, source={moving_src.crs}"
             )
 
         moving_nodata_value = _resolve_nodata(moving_src, moving_nodata)
@@ -704,7 +704,7 @@ def align_image_pair(
                 max_height=fixed_src.height,
             )
             if fixed_window.width <= 0 or fixed_window.height <= 0:
-                raise ValueError("No overlap between moving-image bounds and fixed-image grid.")
+                raise ValueError("No overlap between source-raster bounds and reference-raster grid.")
         else:
             fixed_window = Window(col_off=0, row_off=0, width=fixed_src.width, height=fixed_src.height)
 
@@ -722,7 +722,7 @@ def align_image_pair(
             max_height=moving_src.height,
         )
         if moving_window.width <= 0 or moving_window.height <= 0:
-            raise ValueError("No overlap between fixed-image ROI and moving-image grid.")
+            raise ValueError("No overlap between reference-raster ROI and source-raster grid.")
         moving_window_transform = moving_src.window_transform(moving_window)
 
         solve_width, solve_height, solve_transform = _resolve_solve_grid(
