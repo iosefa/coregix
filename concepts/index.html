@@ -984,7 +984,7 @@
 <span class="normal">3</span>
 <span class="normal">4</span>
 <span class="normal">5</span>
-<span class="normal">6</span></pre></div></td><td class="code"><div><pre><span></span><code>vhr-align-image-pair<span class="w"> </span><span class="se">\</span>
+<span class="normal">6</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--moving-image<span class="w"> </span>source.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--fixed-image<span class="w"> </span>reference.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-image<span class="w"> </span>aligned.tif<span class="w"> </span><span class="se">\</span>
@@ -996,7 +996,7 @@
 <p>By default, Coregix estimates registration on edge-proxy images rather than raw source and reference values. The edge proxy is computed from local image gradients over valid pixels. This emphasizes spatial boundaries and texture while reducing dependence on the original intensity scale.</p>
 <p>Edge proxies are useful when the source and reference rasters represent similar ground structure but have different spectral response, acquisition conditions, or value ranges.</p>
 <p>Use raw values instead with:</p>
-<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code>vhr-align-image-pair<span class="w"> </span>...<span class="w"> </span>--no-use-edge-proxies
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span>...<span class="w"> </span>--no-use-edge-proxies
 </code></pre></div></td></tr></table></div>
 <p>or in Python:</p>
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="n">align_image_pair</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="n">use_edge_proxies</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
@@ -1009,7 +1009,7 @@
 <span class="normal">3</span>
 <span class="normal">4</span>
 <span class="normal">5</span>
-<span class="normal">6</span></pre></div></td><td class="code"><div><pre><span></span><code>vhr-align-image-pair<span class="w"> </span><span class="se">\</span>
+<span class="normal">6</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--moving-image<span class="w"> </span>source.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--fixed-image<span class="w"> </span>reference.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-image<span class="w"> </span>aligned.tif<span class="w"> </span><span class="se">\</span>
@@ -1024,7 +1024,7 @@
 <span class="normal">2</span>
 <span class="normal">3</span>
 <span class="normal">4</span>
-<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code>vhr-align-image-pair<span class="w"> </span><span class="se">\</span>
+<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--moving-image<span class="w"> </span>source.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--fixed-image<span class="w"> </span>reference.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-image<span class="w"> </span>aligned.tif<span class="w"> </span><span class="se">\</span>
@@ -1041,7 +1041,7 @@
 <span class="normal">2</span>
 <span class="normal">3</span>
 <span class="normal">4</span>
-<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code>vhr-align-image-pair<span class="w"> </span><span class="se">\</span>
+<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--moving-image<span class="w"> </span>source.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--fixed-image<span class="w"> </span>reference.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-image<span class="w"> </span>aligned.tif<span class="w"> </span><span class="se">\</span>
@@ -1052,7 +1052,7 @@
 <span class="normal">2</span>
 <span class="normal">3</span>
 <span class="normal">4</span>
-<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code>vhr-align-image-pair<span class="w"> </span><span class="se">\</span>
+<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--moving-image<span class="w"> </span>source.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--fixed-image<span class="w"> </span>reference.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-image<span class="w"> </span>aligned_on_reference_grid.tif<span class="w"> </span><span class="se">\</span>
@@ -1096,7 +1096,7 @@
 <span class="normal">3</span>
 <span class="normal">4</span>
 <span class="normal">5</span>
-<span class="normal">6</span></pre></div></td><td class="code"><div><pre><span></span><code>vhr-align-image-pair<span class="w"> </span><span class="se">\</span>
+<span class="normal">6</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--moving-image<span class="w"> </span>source.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--fixed-image<span class="w"> </span>reference.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-image<span class="w"> </span>aligned_trimmed.tif<span class="w"> </span><span class="se">\</span>

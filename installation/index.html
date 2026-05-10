@@ -861,7 +861,7 @@
 <h2 id="install-from-pypi">Install From PyPI<a class="headerlink" href="#install-from-pypi" title="Permanent link">&para;</a></h2>
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>coregix
 </code></pre></div></td></tr></table></div>
-<p>This installs the Python API and the <code>vhr-align-image-pair</code> command-line entrypoint.</p>
+<p>This installs the Python API and the <code>align-image-pair</code> command-line entrypoint.</p>
 <h2 id="docker">Docker<a class="headerlink" href="#docker" title="Permanent link">&para;</a></h2>
 <p>Coregix can also be built and run as a Docker image:</p>
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>coregix<span class="w"> </span>.
@@ -883,10 +883,10 @@
 <span class="w">  </span>--output-image<span class="w"> </span>/data/aligned.tif
 </code></pre></div></td></tr></table></div>
 <p>If you built the image locally, use <code>coregix</code> instead of <code>iosefa/coregix:latest</code>.</p>
-<p>The container entrypoint is <code>vhr-align-image-pair</code>, so any CLI option can be passed directly after the image name.</p>
+<p>The container entrypoint is <code>align-image-pair</code>, so any CLI option can be passed directly after the image name.</p>
 <h2 id="verify-the-install">Verify The Install<a class="headerlink" href="#verify-the-install" title="Permanent link">&para;</a></h2>
 <p>Check the command-line entrypoint:</p>
-<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code>vhr-align-image-pair<span class="w"> </span>--help
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span>--help
 </code></pre></div></td></tr></table></div>
 <p>You can also run the CLI module directly:</p>
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>coregix.cli.align_image_pair<span class="w"> </span>--help
