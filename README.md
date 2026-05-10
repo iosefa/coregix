@@ -1,11 +1,13 @@
 # Coregix
 
-Coregix provides elastix-based pairwise raster alignment for geospatial imagery.
+Coregix provides pairwise raster coregistration for geospatial imagery.
+
+Coregix coregisters a source raster to a reference raster while preserving geospatial metadata and multi-band outputs. By default, it estimates a translation followed by a rigid transform using mutual-information optimization, then applies the resulting transform to produce a coregistered GeoTIFF.
 
 Current scope:
-- pairwise raster alignment CLI and Python API
-- edge-proxy registration for structural cross-sensor alignment
-- chunked transform application for large moving rasters
+- pairwise GeoTIFF coregistration CLI and Python API
+- edge-proxy registration for cross-sensor structural alignment
+- chunked transform application for large source rasters
 - optional postprocess trimming of invalid edge artifacts
 
 ## Install
@@ -39,21 +41,21 @@ python -m coregix.cli.align_image_pair --help
 
 ## CLI usage
 
-### Align a moving image to a fixed image
+### Coregister a source image to a reference image
 
 ```bash
 vhr-align-image-pair \
-  --moving-image /path/to/moving.tif \
-  --fixed-image /path/to/fixed.tif \
+  --moving-image /path/to/source.tif \
+  --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned.tif
 ```
 
 By default this:
 - registers on edge-proxy images
-- writes the result on the moving-image grid
+- writes the result on the source-raster grid
 - uses no chunking (`--split-factor 0`)
 
-### Use chunking for large moving rasters
+### Use chunking for large source rasters
 
 `--split-factor` controls chunked transform application as `2^k` total chunks:
 - `0`: no split
@@ -65,8 +67,8 @@ Example with quadrants:
 
 ```bash
 vhr-align-image-pair \
-  --moving-image /path/to/moving_large.tif \
-  --fixed-image /path/to/fixed.tif \
+  --moving-image /path/to/source_large.tif \
+  --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned_large.tif \
   --split-factor 2
 ```
@@ -79,8 +81,8 @@ Example:
 
 ```bash
 vhr-align-image-pair \
-  --moving-image /path/to/moving_large.tif \
-  --fixed-image /path/to/fixed.tif \
+  --moving-image /path/to/source_large.tif \
+  --fixed-image /path/to/reference.tif \
   --output-image /path/to/aligned_large_edgefixed.tif \
   --split-factor 2 \
   --trim-edge-invalid \
@@ -98,8 +100,8 @@ The edge-trim thresholds are dataset-specific. `--edge-trim-invalid-below` is us
 from coregix import align_image_pair
 
 result = align_image_pair(
-    moving_image_path="/path/to/moving.tif",
-    fixed_image_path="/path/to/fixed.tif",
+    moving_image_path="/path/to/source.tif",
+    fixed_image_path="/path/to/reference.tif",
     output_image_path="/path/to/aligned.tif",
 )
 
@@ -112,8 +114,8 @@ print(result.output_image_path)
 from coregix import align_image_pair
 
 result = align_image_pair(
-    moving_image_path="/path/to/moving_large.tif",
-    fixed_image_path="/path/to/fixed.tif",
+    moving_image_path="/path/to/source_large.tif",
+    fixed_image_path="/path/to/reference.tif",
     output_image_path="/path/to/aligned_large_edgefixed.tif",
     split_factor=2,
     trim_edge_invalid=True,
