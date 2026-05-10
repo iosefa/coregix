@@ -10,7 +10,8 @@ dependencies:
   - wheel
   - affine>=2.4
   - numpy
+  - pytest>=7.4
   - rasterio>=1.4.3
   - pip:
       - itk-elastix>=0.19.2
-      - -e ".[docs]"
+      - -e ".[docs,test]"
