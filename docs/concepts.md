@@ -80,17 +80,20 @@ align-image-pair \
 
 Coregix estimates the transform on a solve grid derived from the reference raster. By default, the solve grid uses the reference raster's pixel spacing over the registration region.
 
-`--solve-resolution` can be used to estimate the transform on a coarser grid, expressed in raster CRS units:
+`--solve-resolutions` can be used to run one or more solves from coarse to fine, with each pixel size expressed in raster CRS units. Use `0` for the native/reference solve resolution:
 
 ```bash
 align-image-pair \
   --moving-image source.tif \
   --fixed-image reference.tif \
   --output-image aligned.tif \
-  --solve-resolution 2.0
+  --split-factor 2 \
+  --solve-resolutions 8,4,0
 ```
 
-During solve-grid preparation, source and reference registration bands and masks are resampled onto the solve grid with nearest-neighbor resampling. This preserves mask classes and avoids creating interpolated values in the registration inputs.
+Each pass refines the previous transform, and the final output is resampled once from the original source raster. During solve-grid preparation, source and reference registration bands and masks are resampled onto the solve grid with nearest-neighbor resampling. This preserves mask classes and avoids creating interpolated values in the registration inputs.
+
+`--solve-resolution` is deprecated and remains available only for single-pass runs. Prefer `--solve-resolutions`, even for one solve, for example `--solve-resolutions 4`.
 
 ## Transform Application and Resampling
 

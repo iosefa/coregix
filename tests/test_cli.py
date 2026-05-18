@@ -59,6 +59,23 @@ def test_align_parser_boolean_flags_can_be_disabled() -> None:
     assert args.enforce_mutual_valid_mask is False
 
 
+def test_align_parser_accepts_coarse_to_fine_solve_resolutions() -> None:
+    args = align_cli.build_parser().parse_args(
+        [
+            "--moving-image",
+            "source.tif",
+            "--fixed-image",
+            "reference.tif",
+            "--output-image",
+            "aligned.tif",
+            "--solve-resolutions",
+            "8,4,0",
+        ]
+    )
+
+    assert args.solve_resolutions == [8.0, 4.0, None]
+
+
 def test_align_cli_forwards_arguments_and_prints_json(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -91,8 +108,8 @@ def test_align_cli_forwards_arguments_and_prints_json(
             "2",
             "--split-factor",
             "2",
-            "--solve-resolution",
-            "4",
+            "--solve-resolutions",
+            "8,4,0",
             "--trim-edge-invalid",
             "--edge-trim-depth",
             "3",
@@ -110,7 +127,8 @@ def test_align_cli_forwards_arguments_and_prints_json(
     assert captured_kwargs["moving_band_index"] == 1
     assert captured_kwargs["fixed_band_index"] == 2
     assert captured_kwargs["split_factor"] == 2
-    assert captured_kwargs["solve_resolution"] == 4
+    assert captured_kwargs["solve_resolution"] is None
+    assert captured_kwargs["solve_resolutions"] == [8.0, 4.0, None]
     assert captured_kwargs["trim_edge_invalid"] is True
     assert captured_kwargs["edge_trim_depth"] == 3
     assert captured_kwargs["edge_trim_invalid_below"] == -3000

@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 import rasterio
@@ -34,6 +34,20 @@ class AlignmentResult:
 class GlobalRigidTransform:
     rotation: np.ndarray
     translation: np.ndarray
+
+
+def _identity_transform() -> GlobalRigidTransform:
+    return GlobalRigidTransform(
+        rotation=np.eye(2, dtype=np.float64),
+        translation=np.zeros(2, dtype=np.float64),
+    )
+
+
+def _is_identity_transform(transform: GlobalRigidTransform) -> bool:
+    return bool(
+        np.allclose(transform.rotation, np.eye(2, dtype=np.float64))
+        and np.allclose(transform.translation, np.zeros(2, dtype=np.float64))
+    )
 
 
 def _to_int_window(window: Window, max_width: int, max_height: int) -> Window:
@@ -388,6 +402,68 @@ def _source_window_for_target_window(
     return _expand_window(source_window, padding_pixels, moving_width, moving_height)
 
 
+def _sample_moving_band_on_solve_grid(
+    *,
+    moving_src: rasterio.DatasetReader,
+    moving_band_1based: int,
+    moving_nodata_value: Optional[float],
+    out_nodata: float,
+    chunk_solve_transform,
+    solve_width: int,
+    solve_height: int,
+    current_transform: GlobalRigidTransform,
+) -> tuple[np.ndarray, np.ndarray]:
+    target_window = Window(0, 0, solve_width, solve_height)
+    source_window = _source_window_for_target_window(
+        target_window,
+        chunk_solve_transform,
+        moving_src.transform,
+        current_transform,
+        moving_src.width,
+        moving_src.height,
+    )
+    moving_reg_data = np.full(
+        (solve_height, solve_width),
+        moving_nodata_value if moving_nodata_value is not None else out_nodata,
+        dtype=np.float32,
+    )
+    moving_valid_for_registration = np.zeros((solve_height, solve_width), dtype=bool)
+    if source_window.width <= 0 or source_window.height <= 0:
+        return moving_reg_data, moving_valid_for_registration
+
+    moving_band = moving_src.read(moving_band_1based, window=source_window).astype(np.float32)
+    moving_valid = moving_src.read_masks(moving_band_1based, window=source_window).astype(np.float32)
+    if moving_nodata_value is not None:
+        moving_valid *= (moving_band != moving_nodata_value).astype(np.float32)
+
+    x_world, y_world = _pixel_centers_world(chunk_solve_transform, solve_height, solve_width)
+    source_x_world, source_y_world = _apply_world_transform(
+        current_transform,
+        x_world,
+        y_world,
+    )
+    source_transform = moving_src.window_transform(source_window)
+    source_rows, source_cols = _world_to_array_coords(
+        source_transform,
+        source_x_world,
+        source_y_world,
+    )
+    moving_reg_data, moving_sample_valid = _sample_bilinear(
+        moving_band,
+        source_rows,
+        source_cols,
+        fill_value=moving_nodata_value if moving_nodata_value is not None else out_nodata,
+    )
+    sampled_mask, mask_valid = _sample_bilinear(
+        moving_valid,
+        source_rows,
+        source_cols,
+        fill_value=0.0,
+    )
+    moving_valid_for_registration = moving_sample_valid & mask_valid & (sampled_mask > 0.0)
+    return moving_reg_data, moving_valid_for_registration
+
+
 def _estimate_chunk_correspondences(
     *,
     chunk_id: str,
@@ -406,6 +482,7 @@ def _estimate_chunk_correspondences(
     enforce_mutual_valid_mask: bool,
     use_edge_proxies: bool,
     solve_transform,
+    current_transform: GlobalRigidTransform,
     core_solve_window: Window,
     chunk_solve_window: Window,
 ) -> Optional[tuple[np.ndarray, np.ndarray]]:
@@ -425,34 +502,14 @@ def _estimate_chunk_correspondences(
         max_width=int(fixed_window.width),
         max_height=int(fixed_window.height),
     )
-    moving_chunk_abs = _to_int_window(
-        from_bounds(
-            left=chunk_bounds[0],
-            bottom=chunk_bounds[1],
-            right=chunk_bounds[2],
-            top=chunk_bounds[3],
-            transform=moving_src.transform,
-        ),
-        max_width=moving_src.width,
-        max_height=moving_src.height,
-    )
-    if (
-        fixed_chunk_rel.width <= 0
-        or fixed_chunk_rel.height <= 0
-        or moving_chunk_abs.width <= 0
-        or moving_chunk_abs.height <= 0
-    ):
+    if fixed_chunk_rel.width <= 0 or fixed_chunk_rel.height <= 0:
         return None
 
     fixed_chunk_abs = _window_in_parent(fixed_window, fixed_chunk_rel)
     fixed_band = fixed_src.read(fixed_band_1based, window=fixed_chunk_abs)
-    moving_band = moving_src.read(moving_band_1based, window=moving_chunk_abs)
     fixed_valid = fixed_src.read_masks(fixed_band_1based, window=fixed_chunk_abs) > 0
-    moving_valid = moving_src.read_masks(moving_band_1based, window=moving_chunk_abs) > 0
     if fixed_nodata_value is not None:
         fixed_valid &= fixed_band != fixed_nodata_value
-    if moving_nodata_value is not None:
-        moving_valid &= moving_band != moving_nodata_value
 
     solve_height = int(chunk_solve_window.height)
     solve_width = int(chunk_solve_window.width)
@@ -461,13 +518,7 @@ def _estimate_chunk_correspondences(
         fixed_nodata_value if fixed_nodata_value is not None else out_nodata,
         dtype=np.float32,
     )
-    moving_reg_data = np.full(
-        (solve_height, solve_width),
-        moving_nodata_value if moving_nodata_value is not None else out_nodata,
-        dtype=np.float32,
-    )
     fixed_valid_reprojected = np.zeros((solve_height, solve_width), dtype=np.uint8)
-    moving_valid_reprojected = np.zeros((solve_height, solve_width), dtype=np.uint8)
 
     reproject(
         source=fixed_band.astype(np.float32),
@@ -481,17 +532,6 @@ def _estimate_chunk_correspondences(
         resampling=Resampling.nearest,
     )
     reproject(
-        source=moving_band.astype(np.float32),
-        destination=moving_reg_data,
-        src_transform=moving_src.window_transform(moving_chunk_abs),
-        src_crs=moving_src.crs,
-        dst_transform=chunk_solve_transform,
-        dst_crs=fixed_src.crs,
-        src_nodata=moving_nodata_value,
-        dst_nodata=moving_nodata_value if moving_nodata_value is not None else out_nodata,
-        resampling=Resampling.nearest,
-    )
-    reproject(
         source=fixed_valid.astype(np.uint8),
         destination=fixed_valid_reprojected,
         src_transform=fixed_src.window_transform(fixed_chunk_abs),
@@ -502,20 +542,67 @@ def _estimate_chunk_correspondences(
         dst_nodata=0,
         resampling=Resampling.nearest,
     )
-    reproject(
-        source=moving_valid.astype(np.uint8),
-        destination=moving_valid_reprojected,
-        src_transform=moving_src.window_transform(moving_chunk_abs),
-        src_crs=moving_src.crs,
-        dst_transform=chunk_solve_transform,
-        dst_crs=fixed_src.crs,
-        src_nodata=0,
-        dst_nodata=0,
-        resampling=Resampling.nearest,
-    )
+
+    if _is_identity_transform(current_transform):
+        moving_chunk_abs = _to_int_window(
+            from_bounds(
+                left=chunk_bounds[0],
+                bottom=chunk_bounds[1],
+                right=chunk_bounds[2],
+                top=chunk_bounds[3],
+                transform=moving_src.transform,
+            ),
+            max_width=moving_src.width,
+            max_height=moving_src.height,
+        )
+        if moving_chunk_abs.width <= 0 or moving_chunk_abs.height <= 0:
+            return None
+        moving_band = moving_src.read(moving_band_1based, window=moving_chunk_abs)
+        moving_valid = moving_src.read_masks(moving_band_1based, window=moving_chunk_abs) > 0
+        if moving_nodata_value is not None:
+            moving_valid &= moving_band != moving_nodata_value
+        moving_reg_data = np.full(
+            (solve_height, solve_width),
+            moving_nodata_value if moving_nodata_value is not None else out_nodata,
+            dtype=np.float32,
+        )
+        moving_valid_reprojected = np.zeros((solve_height, solve_width), dtype=np.uint8)
+        reproject(
+            source=moving_band.astype(np.float32),
+            destination=moving_reg_data,
+            src_transform=moving_src.window_transform(moving_chunk_abs),
+            src_crs=moving_src.crs,
+            dst_transform=chunk_solve_transform,
+            dst_crs=fixed_src.crs,
+            src_nodata=moving_nodata_value,
+            dst_nodata=moving_nodata_value if moving_nodata_value is not None else out_nodata,
+            resampling=Resampling.nearest,
+        )
+        reproject(
+            source=moving_valid.astype(np.uint8),
+            destination=moving_valid_reprojected,
+            src_transform=moving_src.window_transform(moving_chunk_abs),
+            src_crs=moving_src.crs,
+            dst_transform=chunk_solve_transform,
+            dst_crs=fixed_src.crs,
+            src_nodata=0,
+            dst_nodata=0,
+            resampling=Resampling.nearest,
+        )
+        moving_valid_for_registration = moving_valid_reprojected > 0
+    else:
+        moving_reg_data, moving_valid_for_registration = _sample_moving_band_on_solve_grid(
+            moving_src=moving_src,
+            moving_band_1based=moving_band_1based,
+            moving_nodata_value=moving_nodata_value,
+            out_nodata=out_nodata,
+            chunk_solve_transform=chunk_solve_transform,
+            solve_width=solve_width,
+            solve_height=solve_height,
+            current_transform=current_transform,
+        )
 
     fixed_valid_for_registration = fixed_valid_reprojected > 0
-    moving_valid_for_registration = moving_valid_reprojected > 0
     fixed_mask_for_elastix = fixed_valid_for_registration.astype(np.uint8)
     moving_mask_for_elastix = moving_valid_for_registration.astype(np.uint8)
     if use_edge_proxies:
@@ -602,7 +689,8 @@ def _estimate_chunk_correspondences(
         source_points_local[:, 0].reshape(anchor_cols.shape),
     )
     target_points = np.column_stack([target_x.ravel(), target_y.ravel()])
-    source_points = np.column_stack([source_x.ravel(), source_y.ravel()])
+    residual_source_points = np.column_stack([source_x.ravel(), source_y.ravel()])
+    source_points = _transform_points(current_transform, residual_source_points)
     if not np.isfinite(source_points).all():
         return None
     return target_points, source_points
@@ -634,6 +722,7 @@ def align_image_pair(
     use_edge_proxies: bool = True,
     split_factor: int = 2,
     solve_resolution: Optional[float] = None,
+    solve_resolutions: Optional[Sequence[Optional[float]]] = None,
 ) -> AlignmentResult:
     if band_index < 0:
         raise ValueError("band_index must be >= 0 (0-based).")
@@ -651,6 +740,17 @@ def align_image_pair(
         raise ValueError("split_factor must be > 0 for the chunked alignment path.")
     if solve_resolution is not None and solve_resolution <= 0:
         raise ValueError("solve_resolution must be > 0 when provided.")
+    if solve_resolution is not None and solve_resolutions is not None:
+        raise ValueError("Provide only one of solve_resolution or solve_resolutions.")
+    if solve_resolutions is not None:
+        if len(solve_resolutions) == 0:
+            raise ValueError("solve_resolutions must contain at least one entry.")
+        for resolution in solve_resolutions:
+            if resolution is not None and resolution <= 0:
+                raise ValueError("solve_resolutions entries must be > 0 or None.")
+        solve_resolution_sequence = list(solve_resolutions)
+    else:
+        solve_resolution_sequence = [solve_resolution]
     temp_ctx = None
     work_dir: str
     if keep_temp_dir:
@@ -725,67 +825,74 @@ def align_image_pair(
             raise ValueError("No overlap between reference-raster ROI and source-raster grid.")
         moving_window_transform = moving_src.window_transform(moving_window)
 
-        solve_width, solve_height, solve_transform = _resolve_solve_grid(
-            base_transform=fixed_window_transform,
-            base_width=int(fixed_window.width),
-            base_height=int(fixed_window.height),
-            solve_resolution=solve_resolution,
-        )
+        global_transform = _identity_transform()
+        solve_width = solve_height = 0
+        solve_transform = fixed_window_transform
+        for pass_idx, pass_solve_resolution in enumerate(solve_resolution_sequence):
+            solve_width, solve_height, solve_transform = _resolve_solve_grid(
+                base_transform=fixed_window_transform,
+                base_width=int(fixed_window.width),
+                base_height=int(fixed_window.height),
+                solve_resolution=pass_solve_resolution,
+            )
 
-        solve_rows, solve_cols = _chunk_grid_shape(split_factor, solve_width, solve_height)
-        solve_row_splits = _split_positions(solve_height, solve_rows)
-        solve_col_splits = _split_positions(solve_width, solve_cols)
+            solve_rows, solve_cols = _chunk_grid_shape(split_factor, solve_width, solve_height)
+            solve_row_splits = _split_positions(solve_height, solve_rows)
+            solve_col_splits = _split_positions(solve_width, solve_cols)
 
-        target_points: list[np.ndarray] = []
-        source_points: list[np.ndarray] = []
-        for row_idx in range(solve_rows):
-            for col_idx in range(solve_cols):
-                core_solve_window = Window(
-                    col_off=solve_col_splits[col_idx],
-                    row_off=solve_row_splits[row_idx],
-                    width=solve_col_splits[col_idx + 1] - solve_col_splits[col_idx],
-                    height=solve_row_splits[row_idx + 1] - solve_row_splits[row_idx],
-                )
-                if core_solve_window.width <= 0 or core_solve_window.height <= 0:
-                    continue
-                chunk_solve_window = _expand_window(
-                    core_solve_window,
-                    CHUNK_OVERLAP_PX,
-                    solve_width,
-                    solve_height,
-                )
-                chunk_pairs = _estimate_chunk_correspondences(
-                    chunk_id=f"chunk_r{row_idx}_c{col_idx}",
-                    fixed_src=fixed_src,
-                    moving_src=moving_src,
-                    fixed_window=fixed_window,
-                    fixed_window_transform=fixed_window_transform,
-                    moving_band_1based=moving_band_1based,
-                    fixed_band_1based=fixed_band_1based,
-                    moving_nodata_value=moving_nodata_value,
-                    fixed_nodata_value=fixed_nodata_value,
-                    out_nodata=out_nodata,
-                    min_valid_fraction=min_valid_fraction,
-                    work_dir=work_dir,
-                    log_to_console=log_to_console,
-                    enforce_mutual_valid_mask=enforce_mutual_valid_mask,
-                    use_edge_proxies=use_edge_proxies,
-                    solve_transform=solve_transform,
-                    core_solve_window=core_solve_window,
-                    chunk_solve_window=chunk_solve_window,
-                )
-                if chunk_pairs is None:
-                    continue
-                target_chunk_points, source_chunk_points = chunk_pairs
-                target_points.append(target_chunk_points)
-                source_points.append(source_chunk_points)
+            target_points: list[np.ndarray] = []
+            source_points: list[np.ndarray] = []
+            for row_idx in range(solve_rows):
+                for col_idx in range(solve_cols):
+                    core_solve_window = Window(
+                        col_off=solve_col_splits[col_idx],
+                        row_off=solve_row_splits[row_idx],
+                        width=solve_col_splits[col_idx + 1] - solve_col_splits[col_idx],
+                        height=solve_row_splits[row_idx + 1] - solve_row_splits[row_idx],
+                    )
+                    if core_solve_window.width <= 0 or core_solve_window.height <= 0:
+                        continue
+                    chunk_solve_window = _expand_window(
+                        core_solve_window,
+                        CHUNK_OVERLAP_PX,
+                        solve_width,
+                        solve_height,
+                    )
+                    chunk_pairs = _estimate_chunk_correspondences(
+                        chunk_id=f"pass{pass_idx}_chunk_r{row_idx}_c{col_idx}",
+                        fixed_src=fixed_src,
+                        moving_src=moving_src,
+                        fixed_window=fixed_window,
+                        fixed_window_transform=fixed_window_transform,
+                        moving_band_1based=moving_band_1based,
+                        fixed_band_1based=fixed_band_1based,
+                        moving_nodata_value=moving_nodata_value,
+                        fixed_nodata_value=fixed_nodata_value,
+                        out_nodata=out_nodata,
+                        min_valid_fraction=min_valid_fraction,
+                        work_dir=work_dir,
+                        log_to_console=log_to_console,
+                        enforce_mutual_valid_mask=enforce_mutual_valid_mask,
+                        use_edge_proxies=use_edge_proxies,
+                        solve_transform=solve_transform,
+                        current_transform=global_transform,
+                        core_solve_window=core_solve_window,
+                        chunk_solve_window=chunk_solve_window,
+                    )
+                    if chunk_pairs is None:
+                        continue
+                    target_chunk_points, source_chunk_points = chunk_pairs
+                    target_points.append(target_chunk_points)
+                    source_points.append(source_chunk_points)
 
-        if not target_points:
-            raise ValueError("No chunk produced a valid local solve. Try a lower split_factor or coarser solve_resolution.")
-        global_transform = _fit_global_rigid_transform(
-            np.vstack(target_points),
-            np.vstack(source_points),
-        )
+            if not target_points:
+                raise ValueError(
+                    "No chunk produced a valid local solve. Try a lower split_factor or coarser solve_resolution."
+                )
+            global_transform = _fit_global_rigid_transform(
+                np.vstack(target_points),
+                np.vstack(source_points),
+            )
 
         os.makedirs(os.path.dirname(output_image_path) or ".", exist_ok=True)
         temp_output_image_path = os.path.join(work_dir, os.path.basename(output_image_path))

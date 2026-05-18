@@ -104,6 +104,24 @@ align-image-pair \
   --split-factor 2
 ```
 
+### Use coarse-to-fine registration for large initial offsets
+
+`--solve-resolutions` runs multiple registration solves from coarse to fine,
+then writes the final raster once from the original source image. Use `0` for
+the reference-raster/native solve resolution.
+
+`--solve-resolution` is deprecated and remains available for single-pass
+compatibility. Prefer `--solve-resolutions`, even for one solve.
+
+```bash
+align-image-pair \
+  --moving-image /path/to/source_large.tif \
+  --fixed-image /path/to/reference.tif \
+  --output-image /path/to/aligned_large.tif \
+  --split-factor 2 \
+  --solve-resolutions 8,4,0.5
+```
+
 ### Remove invalid edge artifacts after alignment
 
 `--trim-edge-invalid` runs a raster-space cleanup pass after alignment and sets edge artifacts to nodata.

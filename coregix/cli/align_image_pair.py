@@ -10,6 +10,21 @@ from typing import Optional
 from coregix.pipelines.alignment import align_image_pair
 
 
+def _parse_solve_resolutions(value: str) -> list[Optional[float]]:
+    resolutions: list[Optional[float]] = []
+    for item in value.split(","):
+        text = item.strip()
+        if not text:
+            raise argparse.ArgumentTypeError("--solve-resolutions entries must not be empty.")
+        resolution = float(text)
+        if resolution < 0:
+            raise argparse.ArgumentTypeError("--solve-resolutions entries must be >= 0.")
+        resolutions.append(None if resolution == 0 else resolution)
+    if not resolutions:
+        raise argparse.ArgumentTypeError("--solve-resolutions must contain at least one entry.")
+    return resolutions
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI parser for pairwise raster coregistration."""
     parser = argparse.ArgumentParser(
@@ -79,8 +94,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--solve-resolution",
         type=float,
         help=(
-            "Optional target pixel size, in raster CRS units, for the registration solve. "
-            "Defaults to the reference-raster ROI resolution."
+            "Deprecated single-pass target pixel size, in raster CRS units, for the "
+            "registration solve. Use --solve-resolutions with one or more values instead."
+        ),
+    )
+    parser.add_argument(
+        "--solve-resolutions",
+        type=_parse_solve_resolutions,
+        help=(
+            "Comma-separated coarse-to-fine solve pixel sizes, in raster CRS units. "
+            "Use 0 for native/reference resolution, for example 8,4,0.5 or 8,4,0."
         ),
     )
     parser.add_argument("--temp-dir", help="Optional parent directory for temporary working files.")
@@ -172,6 +195,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error("--fixed-band-index must be >= 0.")
     if args.min_valid_fraction <= 0 or args.min_valid_fraction > 1:
         parser.error("--min-valid-fraction must be in (0, 1].")
+    if args.solve_resolution is not None and args.solve_resolutions is not None:
+        parser.error("Provide only one of --solve-resolution or --solve-resolutions.")
     if args.solve_resolution is not None and args.solve_resolution <= 0:
         parser.error("--solve-resolution must be > 0.")
     if args.split_factor < 0:
@@ -206,6 +231,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         use_edge_proxies=args.use_edge_proxies,
         split_factor=args.split_factor,
         solve_resolution=args.solve_resolution,
+        solve_resolutions=args.solve_resolutions,
     )
 
     print(

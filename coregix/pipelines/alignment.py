@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 import rasterio
@@ -298,6 +298,7 @@ def align_image_pair(
     use_edge_proxies: bool = True,
     split_factor: int = 0,
     solve_resolution: Optional[float] = None,
+    solve_resolutions: Optional[Sequence[Optional[float]]] = None,
 ) -> AlignmentResult:
     """Coregister a source raster to a reference raster.
 
@@ -341,8 +342,14 @@ def align_image_pair(
             raw intensities.
         split_factor: Split the registration solve and final resampling domains
             into ``2**split_factor`` chunks. ``0`` disables chunking.
-        solve_resolution: Optional target pixel size, in raster CRS units, for the
-            registration solve. When omitted, the reference-raster ROI resolution is used.
+        solve_resolution: Deprecated optional target pixel size, in raster CRS units,
+            for a single-pass registration solve. Use ``solve_resolutions`` with one
+            or more values instead.
+        solve_resolutions: Optional coarse-to-fine sequence of solve pixel sizes.
+            Each pass refines the previous transform and the final output is
+            resampled once from the original source raster. ``None`` entries use
+            the reference-raster ROI resolution. Requires chunked alignment when
+            more than one resolution is provided.
 
     Returns:
         AlignmentResult summary with output path and retained temporary directory,
@@ -365,6 +372,18 @@ def align_image_pair(
         raise ValueError("edge_trim_depth must be > 0.")
     if edge_trim_detection_band_index < 0:
         raise ValueError("edge_trim_detection_band_index must be >= 0.")
+    if solve_resolution is not None and solve_resolutions is not None:
+        raise ValueError("Provide only one of solve_resolution or solve_resolutions.")
+    if solve_resolutions is not None:
+        if len(solve_resolutions) == 0:
+            raise ValueError("solve_resolutions must contain at least one entry.")
+        for resolution in solve_resolutions:
+            if resolution is not None and resolution <= 0:
+                raise ValueError("solve_resolutions entries must be > 0 or None.")
+        if split_factor == 0 and len(solve_resolutions) > 1:
+            raise ValueError("Multi-pass solve_resolutions requires split_factor > 0.")
+        if split_factor == 0:
+            solve_resolution = solve_resolutions[0]
     if split_factor > 0:
         from coregix.pipelines.alignment_large_main import (
             align_image_pair as align_image_pair_large_main,
@@ -395,6 +414,7 @@ def align_image_pair(
             use_edge_proxies=use_edge_proxies,
             split_factor=split_factor,
             solve_resolution=solve_resolution,
+            solve_resolutions=solve_resolutions,
         )
     if solve_resolution is not None and solve_resolution <= 0:
         raise ValueError("solve_resolution must be > 0 when provided.")
