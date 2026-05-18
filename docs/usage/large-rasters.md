@@ -42,11 +42,11 @@ Use the smallest split factor that keeps processing stable.
 
 Higher values create more chunks and more overhead. They can also fail if individual chunks do not contain enough valid, informative overlap for registration.
 
-## Coarser Registration Solve
+## Coarse-to-fine Registration Solve
 
-`--solve-resolution` runs the registration solve on a coarser grid while still writing the final output on the requested output grid. The value is expressed in raster CRS units.
+`--solve-resolutions` runs one or more registration solves from coarse to fine while still writing the final output on the requested output grid. Values are expressed in raster CRS units. Use `0` for the native/reference solve resolution.
 
-For a projected CRS in meters, `--solve-resolution 2.0` uses an approximate 2-meter solve grid:
+For a projected CRS in meters, `--solve-resolutions 8,4,0.5` first solves on an approximate 8-meter grid, refines on a 4-meter grid, then refines again on a 0.5-meter grid:
 
 ```bash
 align-image-pair \
@@ -54,23 +54,23 @@ align-image-pair \
   --fixed-image reference.tif \
   --output-image aligned_large.tif \
   --split-factor 2 \
-  --solve-resolution 2.0
+  --solve-resolutions 8,4,0.5
 ```
 
-This can reduce registration cost for high-resolution rasters. Use a solve resolution that preserves the spatial structure needed for alignment.
+Each pass refines the previous transform, and the final raster is sampled once from the original source image. This can make large-offset alignments more stable without stacking multiple resampling steps.
 
-## Coarse-to-fine Alignment
+`--solve-resolution` is deprecated and remains available only for single-pass compatibility. Prefer `--solve-resolutions`, even for one solve, for example `--solve-resolutions 2.0`.
 
-Area-based registration works best when the source and reference rasters are already close. For difficult pairs, a coarse-to-fine approach can be more reliable than a single full-resolution run.
+## Manual Coarse-to-fine Alignment
 
-One practical manual pattern is:
+The in-memory `--solve-resolutions` workflow should be the default coarse-to-fine approach. A manual two-stage pattern can still be useful when you want to inspect or keep the intermediate coarse result:
 
 1. create lower-resolution source and reference products
 2. coregister the lower-resolution source to the lower-resolution reference
 3. use the coarse result to create an intermediate full-resolution source that is closer to the reference
 4. run Coregix again at full resolution to refine the alignment
 
-The first pass handles the larger residual offset on a simpler image pair. The second pass starts from a closer alignment, giving the area-based registration a better chance of converging on the fine-scale correction. Coregix does not currently accept an initial transform directly; this is a two-stage processing strategy using the output from the first run as input to the second.
+The first pass handles the larger residual offset on a simpler image pair. The second pass starts from a closer alignment, giving the area-based registration a better chance of converging on the fine-scale correction.
 
 ## Grid and Metadata Behavior
 
