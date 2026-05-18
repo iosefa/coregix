@@ -1019,18 +1019,21 @@
 <p><code>--min-valid-fraction</code> controls the minimum valid-pixel fraction required in the registration solve. If the valid area is too small, Coregix stops instead of estimating a poorly constrained transform.</p>
 <h2 id="solve-grid">Solve Grid<a class="headerlink" href="#solve-grid" title="Permanent link">&para;</a></h2>
 <p>Coregix estimates the transform on a solve grid derived from the reference raster. By default, the solve grid uses the reference raster's pixel spacing over the registration region.</p>
-<p><code>--solve-resolution</code> can be used to estimate the transform on a coarser grid, expressed in raster CRS units:</p>
+<p><code>--solve-resolutions</code> can be used to run one or more solves from coarse to fine, with each pixel size expressed in raster CRS units. Use <code>0</code> for the native/reference solve resolution:</p>
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span>
 <span class="normal">2</span>
 <span class="normal">3</span>
 <span class="normal">4</span>
-<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span><span class="se">\</span>
+<span class="normal">5</span>
+<span class="normal">6</span></pre></div></td><td class="code"><div><pre><span></span><code>align-image-pair<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--moving-image<span class="w"> </span>source.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--fixed-image<span class="w"> </span>reference.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-image<span class="w"> </span>aligned.tif<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--solve-resolution<span class="w"> </span><span class="m">2</span>.0
+<span class="w">  </span>--split-factor<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--solve-resolutions<span class="w"> </span><span class="m">8</span>,4,0
 </code></pre></div></td></tr></table></div>
-<p>During solve-grid preparation, source and reference registration bands and masks are resampled onto the solve grid with nearest-neighbor resampling. This preserves mask classes and avoids creating interpolated values in the registration inputs.</p>
+<p>Each pass refines the previous transform, and the final output is resampled once from the original source raster. During solve-grid preparation, source and reference registration bands and masks are resampled onto the solve grid with nearest-neighbor resampling. This preserves mask classes and avoids creating interpolated values in the registration inputs.</p>
+<p><code>--solve-resolution</code> is deprecated and remains available only for single-pass runs. Prefer <code>--solve-resolutions</code>, even for one solve, for example <code>--solve-resolutions 4</code>.</p>
 <h2 id="transform-application-and-resampling">Transform Application and Resampling<a class="headerlink" href="#transform-application-and-resampling" title="Permanent link">&para;</a></h2>
 <p>After the transform is estimated, Coregix applies it to every band in the source raster. The final output is produced by sampling source pixels at transformed coordinates and writing the sampled values to the output grid.</p>
 <p>For source-grid output and chunked output, Coregix uses bilinear sampling for raster values and masks invalid samples to nodata. Reference-grid output can use the registration backend's resampling path when the solve grid matches the reference grid, and bilinear resampling when remapping from a coarser solve grid. In general, Coregix outputs are best suited to continuous image data. For categorical rasters, class labels may be mixed by interpolation; those products should be handled with care.</p>

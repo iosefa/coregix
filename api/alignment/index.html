@@ -951,7 +951,7 @@
 
 
 <h3 id="coregix.align_image_pair" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">align_image_pair</span><span class="p">(</span><span class="n">moving_image_path</span><span class="p">,</span> <span class="n">fixed_image_path</span><span class="p">,</span> <span class="n">output_image_path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">band_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">moving_band_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fixed_band_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">moving_nodata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fixed_nodata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_nodata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">min_valid_fraction</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span> <span class="n">temp_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keep_temp_dir</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">log_to_console</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">clip_fixed_to_moving</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">output_on_moving_grid</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">trim_edge_invalid</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">edge_trim_depth</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">edge_trim_detection_band_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">edge_trim_invalid_below</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">edge_trim_invalid_above</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">enforce_mutual_valid_mask</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">use_edge_proxies</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">split_factor</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">solve_resolution</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-function"></code>            <code class="highlight language-python"><span class="n">align_image_pair</span><span class="p">(</span><span class="n">moving_image_path</span><span class="p">,</span> <span class="n">fixed_image_path</span><span class="p">,</span> <span class="n">output_image_path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">band_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">moving_band_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fixed_band_index</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">moving_nodata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fixed_nodata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">output_nodata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">min_valid_fraction</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span> <span class="n">temp_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">keep_temp_dir</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">log_to_console</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">clip_fixed_to_moving</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">output_on_moving_grid</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">trim_edge_invalid</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">edge_trim_depth</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">edge_trim_detection_band_index</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">edge_trim_invalid_below</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">edge_trim_invalid_above</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">enforce_mutual_valid_mask</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">use_edge_proxies</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">split_factor</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">solve_resolution</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">solve_resolutions</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#coregix.align_image_pair" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1364,8 +1364,29 @@ into <code>2**split_factor</code> chunks. <code>0</code> disables chunking.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional target pixel size, in raster CRS units, for the
-registration solve. When omitted, the reference-raster ROI resolution is used.</p>
+                <p>Deprecated optional target pixel size, in raster CRS units,
+for a single-pass registration solve. Use <code>solve_resolutions</code> with one
+or more values instead.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>solve_resolutions</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="typing.Sequence">Sequence</span>[<span title="typing.Optional">Optional</span>[<span title="float">float</span>]]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional coarse-to-fine sequence of solve pixel sizes.
+Each pass refines the previous transform and the final output is
+resampled once from the original source raster. <code>None</code> entries use
+the reference-raster ROI resolution. Requires chunked alignment when
+more than one resolution is provided.</p>
               </div>
             </td>
             <td>
@@ -2012,7 +2033,27 @@ registration solve. When omitted, the reference-raster ROI resolution is used.</
 <span class="normal">840</span>
 <span class="normal">841</span>
 <span class="normal">842</span>
-<span class="normal">843</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">align_image_pair</span><span class="p">(</span>
+<span class="normal">843</span>
+<span class="normal">844</span>
+<span class="normal">845</span>
+<span class="normal">846</span>
+<span class="normal">847</span>
+<span class="normal">848</span>
+<span class="normal">849</span>
+<span class="normal">850</span>
+<span class="normal">851</span>
+<span class="normal">852</span>
+<span class="normal">853</span>
+<span class="normal">854</span>
+<span class="normal">855</span>
+<span class="normal">856</span>
+<span class="normal">857</span>
+<span class="normal">858</span>
+<span class="normal">859</span>
+<span class="normal">860</span>
+<span class="normal">861</span>
+<span class="normal">862</span>
+<span class="normal">863</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">align_image_pair</span><span class="p">(</span>
     <span class="n">moving_image_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
     <span class="n">fixed_image_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
     <span class="n">output_image_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
@@ -2038,6 +2079,7 @@ registration solve. When omitted, the reference-raster ROI resolution is used.</
     <span class="n">use_edge_proxies</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
     <span class="n">split_factor</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
     <span class="n">solve_resolution</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">solve_resolutions</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Sequence</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AlignmentResult</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Coregister a source raster to a reference raster.</span>
 
@@ -2081,8 +2123,14 @@ registration solve. When omitted, the reference-raster ROI resolution is used.</
 <span class="sd">            raw intensities.</span>
 <span class="sd">        split_factor: Split the registration solve and final resampling domains</span>
 <span class="sd">            into ``2**split_factor`` chunks. ``0`` disables chunking.</span>
-<span class="sd">        solve_resolution: Optional target pixel size, in raster CRS units, for the</span>
-<span class="sd">            registration solve. When omitted, the reference-raster ROI resolution is used.</span>
+<span class="sd">        solve_resolution: Deprecated optional target pixel size, in raster CRS units,</span>
+<span class="sd">            for a single-pass registration solve. Use ``solve_resolutions`` with one</span>
+<span class="sd">            or more values instead.</span>
+<span class="sd">        solve_resolutions: Optional coarse-to-fine sequence of solve pixel sizes.</span>
+<span class="sd">            Each pass refines the previous transform and the final output is</span>
+<span class="sd">            resampled once from the original source raster. ``None`` entries use</span>
+<span class="sd">            the reference-raster ROI resolution. Requires chunked alignment when</span>
+<span class="sd">            more than one resolution is provided.</span>
 
 <span class="sd">    Returns:</span>
 <span class="sd">        AlignmentResult summary with output path and retained temporary directory,</span>
@@ -2105,6 +2153,18 @@ registration solve. When omitted, the reference-raster ROI resolution is used.</
         <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;edge_trim_depth must be &gt; 0.&quot;</span><span class="p">)</span>
     <span class="k">if</span> <span class="n">edge_trim_detection_band_index</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;edge_trim_detection_band_index must be &gt;= 0.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">solve_resolution</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">solve_resolutions</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Provide only one of solve_resolution or solve_resolutions.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">solve_resolutions</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">solve_resolutions</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;solve_resolutions must contain at least one entry.&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">resolution</span> <span class="ow">in</span> <span class="n">solve_resolutions</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">resolution</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">resolution</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;solve_resolutions entries must be &gt; 0 or None.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">split_factor</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">solve_resolutions</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Multi-pass solve_resolutions requires split_factor &gt; 0.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">split_factor</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">solve_resolution</span> <span class="o">=</span> <span class="n">solve_resolutions</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
     <span class="k">if</span> <span class="n">split_factor</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
         <span class="kn">from</span><span class="w"> </span><span class="nn">coregix.pipelines.alignment_large_main</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
             <span class="n">align_image_pair</span> <span class="k">as</span> <span class="n">align_image_pair_large_main</span><span class="p">,</span>
@@ -2135,6 +2195,7 @@ registration solve. When omitted, the reference-raster ROI resolution is used.</
             <span class="n">use_edge_proxies</span><span class="o">=</span><span class="n">use_edge_proxies</span><span class="p">,</span>
             <span class="n">split_factor</span><span class="o">=</span><span class="n">split_factor</span><span class="p">,</span>
             <span class="n">solve_resolution</span><span class="o">=</span><span class="n">solve_resolution</span><span class="p">,</span>
+            <span class="n">solve_resolutions</span><span class="o">=</span><span class="n">solve_resolutions</span><span class="p">,</span>
         <span class="p">)</span>
     <span class="k">if</span> <span class="n">solve_resolution</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">solve_resolution</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
         <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;solve_resolution must be &gt; 0 when provided.&quot;</span><span class="p">)</span>

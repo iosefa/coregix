@@ -479,10 +479,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#coarser-registration-solve" class="md-nav__link">
+  <a href="#coarse-to-fine-registration-solve" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Coarser Registration Solve
+        Coarse-to-fine Registration Solve
       
     </span>
   </a>
@@ -490,10 +490,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#coarse-to-fine-alignment" class="md-nav__link">
+  <a href="#manual-coarse-to-fine-alignment" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Coarse-to-fine Alignment
+        Manual Coarse-to-fine Alignment
       
     </span>
   </a>
@@ -775,10 +775,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#coarser-registration-solve" class="md-nav__link">
+  <a href="#coarse-to-fine-registration-solve" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Coarser Registration Solve
+        Coarse-to-fine Registration Solve
       
     </span>
   </a>
@@ -786,10 +786,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#coarse-to-fine-alignment" class="md-nav__link">
+  <a href="#manual-coarse-to-fine-alignment" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Coarse-to-fine Alignment
+        Manual Coarse-to-fine Alignment
       
     </span>
   </a>
@@ -893,9 +893,9 @@
 </tbody>
 </table>
 <p>Higher values create more chunks and more overhead. They can also fail if individual chunks do not contain enough valid, informative overlap for registration.</p>
-<h2 id="coarser-registration-solve">Coarser Registration Solve<a class="headerlink" href="#coarser-registration-solve" title="Permanent link">&para;</a></h2>
-<p><code>--solve-resolution</code> runs the registration solve on a coarser grid while still writing the final output on the requested output grid. The value is expressed in raster CRS units.</p>
-<p>For a projected CRS in meters, <code>--solve-resolution 2.0</code> uses an approximate 2-meter solve grid:</p>
+<h2 id="coarse-to-fine-registration-solve">Coarse-to-fine Registration Solve<a class="headerlink" href="#coarse-to-fine-registration-solve" title="Permanent link">&para;</a></h2>
+<p><code>--solve-resolutions</code> runs one or more registration solves from coarse to fine while still writing the final output on the requested output grid. Values are expressed in raster CRS units. Use <code>0</code> for the native/reference solve resolution.</p>
+<p>For a projected CRS in meters, <code>--solve-resolutions 8,4,0.5</code> first solves on an approximate 8-meter grid, refines on a 4-meter grid, then refines again on a 0.5-meter grid:</p>
 <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1</span>
 <span class="normal">2</span>
 <span class="normal">3</span>
@@ -906,19 +906,19 @@
 <span class="w">  </span>--fixed-image<span class="w"> </span>reference.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output-image<span class="w"> </span>aligned_large.tif<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--split-factor<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--solve-resolution<span class="w"> </span><span class="m">2</span>.0
+<span class="w">  </span>--solve-resolutions<span class="w"> </span><span class="m">8</span>,4,0.5
 </code></pre></div></td></tr></table></div>
-<p>This can reduce registration cost for high-resolution rasters. Use a solve resolution that preserves the spatial structure needed for alignment.</p>
-<h2 id="coarse-to-fine-alignment">Coarse-to-fine Alignment<a class="headerlink" href="#coarse-to-fine-alignment" title="Permanent link">&para;</a></h2>
-<p>Area-based registration works best when the source and reference rasters are already close. For difficult pairs, a coarse-to-fine approach can be more reliable than a single full-resolution run.</p>
-<p>One practical manual pattern is:</p>
+<p>Each pass refines the previous transform, and the final raster is sampled once from the original source image. This can make large-offset alignments more stable without stacking multiple resampling steps.</p>
+<p><code>--solve-resolution</code> is deprecated and remains available only for single-pass compatibility. Prefer <code>--solve-resolutions</code>, even for one solve, for example <code>--solve-resolutions 2.0</code>.</p>
+<h2 id="manual-coarse-to-fine-alignment">Manual Coarse-to-fine Alignment<a class="headerlink" href="#manual-coarse-to-fine-alignment" title="Permanent link">&para;</a></h2>
+<p>The in-memory <code>--solve-resolutions</code> workflow should be the default coarse-to-fine approach. A manual two-stage pattern can still be useful when you want to inspect or keep the intermediate coarse result:</p>
 <ol>
 <li>create lower-resolution source and reference products</li>
 <li>coregister the lower-resolution source to the lower-resolution reference</li>
 <li>use the coarse result to create an intermediate full-resolution source that is closer to the reference</li>
 <li>run Coregix again at full resolution to refine the alignment</li>
 </ol>
-<p>The first pass handles the larger residual offset on a simpler image pair. The second pass starts from a closer alignment, giving the area-based registration a better chance of converging on the fine-scale correction. Coregix does not currently accept an initial transform directly; this is a two-stage processing strategy using the output from the first run as input to the second.</p>
+<p>The first pass handles the larger residual offset on a simpler image pair. The second pass starts from a closer alignment, giving the area-based registration a better chance of converging on the fine-scale correction.</p>
 <h2 id="grid-and-metadata-behavior">Grid and Metadata Behavior<a class="headerlink" href="#grid-and-metadata-behavior" title="Permanent link">&para;</a></h2>
 <p>Chunked output follows the same grid rules as standard alignment:</p>
 <ul>
