@@ -736,8 +736,8 @@ def align_image_pair(
         raise ValueError("edge_trim_depth must be > 0.")
     if edge_trim_detection_band_index < 0:
         raise ValueError("edge_trim_detection_band_index must be >= 0.")
-    if split_factor <= 0:
-        raise ValueError("split_factor must be > 0 for the chunked alignment path.")
+    if split_factor < 0:
+        raise ValueError("split_factor must be >= 0.")
     if solve_resolution is not None and solve_resolution <= 0:
         raise ValueError("solve_resolution must be > 0 when provided.")
     if solve_resolution is not None and solve_resolutions is not None:

@@ -93,7 +93,7 @@ align-image-pair \
 
 Each pass refines the previous transform, and the final output is resampled once from the original source raster. During solve-grid preparation, source and reference registration bands and masks are resampled onto the solve grid with nearest-neighbor resampling. This preserves mask classes and avoids creating interpolated values in the registration inputs.
 
-`--solve-resolution` is deprecated and remains available only for single-pass runs. Prefer `--solve-resolutions`, even for one solve, for example `--solve-resolutions 4`.
+`--solve-resolutions` can run over the whole overlap with `--split-factor 0`, or over chunked solve windows with higher split factors. `--solve-resolution` is deprecated and remains available only for single-pass runs. Prefer `--solve-resolutions`, even for one solve, for example `--solve-resolutions 4`.
 
 ## Transform Application and Resampling
 

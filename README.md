@@ -110,6 +110,8 @@ align-image-pair \
 then writes the final raster once from the original source image. Use `0` for
 the reference-raster/native solve resolution.
 
+`--solve-resolutions` works with `--split-factor 0` for whole-image multi-pass solves when memory permits, or with higher split factors for chunked solves.
+
 `--solve-resolution` is deprecated and remains available for single-pass
 compatibility. Prefer `--solve-resolutions`, even for one solve.
 

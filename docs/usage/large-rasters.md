@@ -57,7 +57,7 @@ align-image-pair \
   --solve-resolutions 8,4,0.5
 ```
 
-Each pass refines the previous transform, and the final raster is sampled once from the original source image. This can make large-offset alignments more stable without stacking multiple resampling steps.
+Each pass refines the previous transform, and the final raster is sampled once from the original source image. This can make large-offset alignments more stable without stacking multiple resampling steps. Use `--split-factor 0` for a whole-image multi-pass solve when memory permits; use higher split factors to reduce memory pressure on large rasters.
 
 `--solve-resolution` is deprecated and remains available only for single-pass compatibility. Prefer `--solve-resolutions`, even for one solve, for example `--solve-resolutions 2.0`.
 

@@ -92,3 +92,27 @@ def test_fit_global_rigid_transform_recovers_translation() -> None:
 def test_chunk_grid_shape_rejects_negative_split_factor() -> None:
     with pytest.raises(ValueError, match="split_factor"):
         alignment_large_main._chunk_grid_shape(-1, 10, 10)
+
+
+def test_multi_pass_solve_resolutions_allow_split_factor_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def fake_large_align(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return alignment.AlignmentResult(output_image_path="out.tif", temp_dir=None)
+
+    monkeypatch.setattr(alignment_large_main, "align_image_pair", fake_large_align)
+
+    result = alignment.align_image_pair(
+        "moving.tif",
+        "fixed.tif",
+        "out.tif",
+        split_factor=0,
+        solve_resolutions=[6.0, 2.0],
+    )
+
+    assert result.output_image_path == "out.tif"
+    assert captured["kwargs"]["split_factor"] == 0
+    assert captured["kwargs"]["solve_resolution"] is None
+    assert captured["kwargs"]["solve_resolutions"] == [6.0, 2.0]

@@ -348,8 +348,7 @@ def align_image_pair(
         solve_resolutions: Optional coarse-to-fine sequence of solve pixel sizes.
             Each pass refines the previous transform and the final output is
             resampled once from the original source raster. ``None`` entries use
-            the reference-raster ROI resolution. Requires chunked alignment when
-            more than one resolution is provided.
+            the reference-raster ROI resolution.
 
     Returns:
         AlignmentResult summary with output path and retained temporary directory,
@@ -380,11 +379,9 @@ def align_image_pair(
         for resolution in solve_resolutions:
             if resolution is not None and resolution <= 0:
                 raise ValueError("solve_resolutions entries must be > 0 or None.")
-        if split_factor == 0 and len(solve_resolutions) > 1:
-            raise ValueError("Multi-pass solve_resolutions requires split_factor > 0.")
-        if split_factor == 0:
+        if split_factor == 0 and len(solve_resolutions) == 1:
             solve_resolution = solve_resolutions[0]
-    if split_factor > 0:
+    if split_factor > 0 or (solve_resolutions is not None and len(solve_resolutions) > 1):
         from coregix.pipelines.alignment_large_main import (
             align_image_pair as align_image_pair_large_main,
         )
