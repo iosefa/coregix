@@ -2,42 +2,42 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://coregix.sefa.ai/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/concepts/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/installation/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/api/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/api/alignment/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/api/edge-trimming/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/api/registration/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/usage/alignment/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/usage/edge-trimming/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
     <url>
          <loc>https://coregix.sefa.ai/usage/large-rasters/</loc>
-         <lastmod>2026-05-18</lastmod>
+         <lastmod>2026-05-21</lastmod>
     </url>
 </urlset>
