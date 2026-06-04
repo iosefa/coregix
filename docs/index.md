@@ -29,7 +29,7 @@ Coregix expects:
 - useful raster masks or nodata values for invalid regions
 - imagery that is close enough for translation/rigid registration to converge
 
-Large rasters can be processed in chunks. Edge cleanup is available for outputs with invalid border artifacts after resampling.
+Large rasters can be processed in chunks. Edge cleanup is available for outputs with invalid border artifacts after resampling. Optional dry-run mode estimates transform metadata without writing an aligned raster, and paired vector features can be evaluated against that transform before committing to a large output write.
 
 ## First Alignment
 
@@ -62,5 +62,6 @@ print(result.output_image_path)
 - [Concepts](concepts.md): read about grids, masks, edge proxies, and chunking.
 - [Align Image Pairs](usage/alignment.md): run the CLI or Python API.
 - [Large Rasters](usage/large-rasters.md): use chunked transform application.
+- [Vector Alignment Evaluation](usage/vector-alignment.md): evaluate paired vector features against transform metadata.
 - [Edge Trimming](usage/edge-trimming.md): clean invalid border artifacts.
 - [API Reference](api/index.md): inspect generated API documentation.

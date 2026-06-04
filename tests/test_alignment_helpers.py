@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import numpy as np
 import pytest
+import rasterio
 from affine import Affine
+from rasterio.transform import from_origin
 
 from coregix.pipelines import alignment
 from coregix.pipelines import alignment_large_main
@@ -116,3 +119,132 @@ def test_multi_pass_solve_resolutions_allow_split_factor_zero(monkeypatch: pytes
     assert captured["kwargs"]["split_factor"] == 0
     assert captured["kwargs"]["solve_resolution"] is None
     assert captured["kwargs"]["solve_resolutions"] == [6.0, 2.0]
+
+
+def test_single_pass_coarse_solve_writes_from_original_pixels(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows, cols = np.indices((32, 32))
+    data = ((rows * 17 + cols * 31) % 1000).astype("int16")
+    profile = {
+        "driver": "GTiff",
+        "height": 32,
+        "width": 32,
+        "count": 1,
+        "dtype": "int16",
+        "crs": "EPSG:32605",
+        "transform": from_origin(500000.0, 1000.0, 1.0, 1.0),
+        "nodata": -9999,
+    }
+    fixed_path = tmp_path / "fixed.tif"
+    moving_path = tmp_path / "moving.tif"
+    output_path = tmp_path / "aligned.tif"
+    for image_path in (fixed_path, moving_path):
+        with rasterio.open(image_path, "w", **profile) as dst:
+            dst.write(data, 1)
+
+    def fake_estimate_elastix_transform(**kwargs):
+        return object()
+
+    def fake_deformation_field_from_transform(
+        fixed_image_path, transform_parameter_object, output_directory
+    ):
+        with rasterio.open(fixed_image_path) as src:
+            return np.zeros((src.height, src.width, 2), dtype=np.float32)
+
+    monkeypatch.setattr(
+        alignment, "estimate_elastix_transform", fake_estimate_elastix_transform
+    )
+    monkeypatch.setattr(
+        alignment, "deformation_field_from_transform", fake_deformation_field_from_transform
+    )
+
+    alignment.align_image_pair(
+        moving_image_path=str(moving_path),
+        fixed_image_path=str(fixed_path),
+        output_image_path=str(output_path),
+        moving_band_index=0,
+        fixed_band_index=0,
+        output_on_moving_grid=False,
+        split_factor=0,
+        solve_resolutions=[8.0],
+        use_edge_proxies=False,
+    )
+
+    with rasterio.open(output_path) as src:
+        result = src.read(1)
+        assert src.res == (1.0, 1.0)
+
+    np.testing.assert_array_equal(result, data)
+
+
+def test_single_pass_writes_optional_transform_json(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows, cols = np.indices((16, 16))
+    data = (rows + cols).astype("int16")
+    profile = {
+        "driver": "GTiff",
+        "height": 16,
+        "width": 16,
+        "count": 1,
+        "dtype": "int16",
+        "crs": "EPSG:32605",
+        "transform": from_origin(500000.0, 1000.0, 1.0, 1.0),
+        "nodata": -9999,
+    }
+    fixed_path = tmp_path / "fixed.tif"
+    moving_path = tmp_path / "moving.tif"
+    output_path = tmp_path / "aligned.tif"
+    transform_json_path = tmp_path / "aligned.coregix.json"
+    for image_path in (fixed_path, moving_path):
+        with rasterio.open(image_path, "w", **profile) as dst:
+            dst.write(data, 1)
+
+    class FakeParameterObject:
+        def GetNumberOfParameterMaps(self):
+            return 1
+
+        def GetParameterMap(self, idx):
+            return {
+                "Transform": ["TranslationTransform"],
+                "TransformParameters": ["0", "0"],
+            }
+
+    def fake_estimate_elastix_transform(**kwargs):
+        return FakeParameterObject()
+
+    def fake_deformation_field_from_transform(
+        fixed_image_path, transform_parameter_object, output_directory
+    ):
+        with rasterio.open(fixed_image_path) as src:
+            return np.zeros((src.height, src.width, 2), dtype=np.float32)
+
+    monkeypatch.setattr(
+        alignment, "estimate_elastix_transform", fake_estimate_elastix_transform
+    )
+    monkeypatch.setattr(
+        alignment, "deformation_field_from_transform", fake_deformation_field_from_transform
+    )
+
+    result = alignment.align_image_pair(
+        moving_image_path=str(moving_path),
+        fixed_image_path=str(fixed_path),
+        output_image_path=str(output_path),
+        moving_band_index=0,
+        fixed_band_index=0,
+        output_on_moving_grid=False,
+        output_transform_json_path=str(transform_json_path),
+        split_factor=0,
+        solve_resolutions=[4.0],
+        use_edge_proxies=False,
+    )
+
+    assert result.output_transform_json_path == str(transform_json_path)
+    metadata = json.loads(transform_json_path.read_text())
+    assert metadata["coregix_transform_schema_version"] == 1
+    assert metadata["transform_model"] == "elastix_translation_rigid_world_affine"
+    assert metadata["paths"]["output_image"] == str(output_path)
+    np.testing.assert_allclose(
+        metadata["source_to_target"]["matrix"],
+        np.eye(3),
+        atol=1e-9,
+    )

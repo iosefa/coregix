@@ -13,6 +13,8 @@ The default registration schedule estimates:
 
 The rigid stage allows rotation in addition to translation. The default similarity metric is mutual information, which is useful when corresponding surfaces have different radiometry or come from different sensors. This makes the method less dependent on matching raw pixel values exactly, but it still requires shared spatial structure in the images.
 
+An experimental B-spline nonrigid model is available with `--transform-model bspline`. It estimates a local deformation field after the translation and rigid stages and applies that deformation directly to the output raster. This can reduce local residual distortion, but it can also deform object shapes and should be QA'd carefully. Coregix treats this as a direct raster-alignment mode rather than a reusable transform mode: it does not currently export a nonrigid transform JSON, apply saved nonrigid transforms, evaluate moving vector features through the deformation field, or combine B-spline solves with chunking or multi-pass solve sequences.
+
 ## Source and Reference Rasters
 
 The reference raster defines the image that the source raster is coregistered against. The source raster is the image that gets transformed and written to the output.
@@ -138,7 +140,7 @@ Use the source grid when the output needs to remain compatible with an existing 
 | `2` | 4 chunks |
 | `3` | 8 chunks |
 
-For chunked runs, Coregix estimates local registrations over overlapping chunks, samples anchor correspondences from successful chunks, and fits a single global rigid transform from those correspondences. The final output is then written block by block. This reduces memory pressure while keeping the output model globally consistent.
+For chunked runs, Coregix estimates local registrations over overlapping chunks, samples anchor correspondences from successful chunks, and fits a single global rigid transform from those correspondences. The final output is then written block by block. This reduces memory pressure while keeping the output model globally consistent. Chunking is not supported with the experimental B-spline nonrigid model.
 
 Use the smallest `split_factor` that keeps processing stable. Higher values increase overhead and can fail if individual chunks do not contain enough valid, informative overlap.
 
@@ -167,4 +169,4 @@ Coregix is best suited to residual geometric offsets between already georeferenc
 - rasters with little spatial overlap
 - rasters with weak shared spatial structure
 
-For those cases, correct the georeferencing first or use a registration model designed for local deformation.
+For those cases, correct the georeferencing first or use a registration model designed for local deformation. The experimental `--transform-model bspline` mode can be useful for exploratory local correction, but it currently does not support dry-run transform JSON, saved-transform application, vector RMSE evaluation, chunking, or multi-pass solve resolutions.

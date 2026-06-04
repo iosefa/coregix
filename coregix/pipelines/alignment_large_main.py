@@ -18,6 +18,12 @@ from rasterio.windows import Window, from_bounds
 from coregix.preprocess.registration import (
     estimate_elastix_transform,
 )
+from coregix.pipelines.transform_metadata import (
+    add_matrix_metadata,
+    base_transform_metadata,
+    matrix_from_rotation_translation,
+    write_transform_metadata,
+)
 
 DEFAULT_ALIGNMENT_PARAMETER_MAPS = ["translation", "rigid"]
 CHUNK_OVERLAP_PX = 256
@@ -26,8 +32,11 @@ ANCHOR_GRID_SIZE = 3
 
 @dataclass
 class AlignmentResult:
-    output_image_path: str
+    output_image_path: Optional[str]
     temp_dir: Optional[str]
+    output_transform_json_path: Optional[str] = None
+    transform_metadata: Optional[dict[str, object]] = None
+    dry_run: bool = False
 
 
 @dataclass
@@ -699,7 +708,7 @@ def _estimate_chunk_correspondences(
 def align_image_pair(
     moving_image_path: str,
     fixed_image_path: str,
-    output_image_path: str,
+    output_image_path: Optional[str] = None,
     *,
     band_index: int = 0,
     moving_band_index: Optional[int] = None,
@@ -723,7 +732,16 @@ def align_image_pair(
     split_factor: int = 2,
     solve_resolution: Optional[float] = None,
     solve_resolutions: Optional[Sequence[Optional[float]]] = None,
+    transform_model: str = "rigid",
+    output_transform_json_path: Optional[str] = None,
+    dry_run: bool = False,
 ) -> AlignmentResult:
+    if transform_model != "rigid":
+        raise ValueError("alignment_large_main only supports transform_model='rigid'.")
+    if dry_run and output_transform_json_path is None:
+        raise ValueError("output_transform_json_path is required when dry_run=True.")
+    if not dry_run and output_image_path is None:
+        raise ValueError("output_image_path is required unless dry_run=True.")
     if band_index < 0:
         raise ValueError("band_index must be >= 0 (0-based).")
     if moving_band_index is not None and moving_band_index < 0:
@@ -828,6 +846,7 @@ def align_image_pair(
         global_transform = _identity_transform()
         solve_width = solve_height = 0
         solve_transform = fixed_window_transform
+        pass_summaries: list[dict[str, object]] = []
         for pass_idx, pass_solve_resolution in enumerate(solve_resolution_sequence):
             solve_width, solve_height, solve_transform = _resolve_solve_grid(
                 base_transform=fixed_window_transform,
@@ -889,13 +908,35 @@ def align_image_pair(
                 raise ValueError(
                     "No chunk produced a valid local solve. Try a lower split_factor or coarser solve_resolution."
                 )
+            target_stack = np.vstack(target_points)
+            source_stack = np.vstack(source_points)
             global_transform = _fit_global_rigid_transform(
-                np.vstack(target_points),
-                np.vstack(source_points),
+                target_stack,
+                source_stack,
+            )
+            predicted = _transform_points(global_transform, target_stack)
+            residuals = np.linalg.norm(predicted - source_stack, axis=1)
+            pass_summaries.append(
+                {
+                    "pass_index": int(pass_idx),
+                    "solve_resolution": None
+                    if pass_solve_resolution is None
+                    else float(pass_solve_resolution),
+                    "solve_grid_width": int(solve_width),
+                    "solve_grid_height": int(solve_height),
+                    "chunk_rows": int(solve_rows),
+                    "chunk_cols": int(solve_cols),
+                    "successful_chunks": int(len(target_points)),
+                    "anchor_point_count": int(target_stack.shape[0]),
+                    "anchor_rmse": float(np.sqrt(np.mean(residuals**2))),
+                    "anchor_median_error": float(np.median(residuals)),
+                }
             )
 
-        os.makedirs(os.path.dirname(output_image_path) or ".", exist_ok=True)
-        temp_output_image_path = os.path.join(work_dir, os.path.basename(output_image_path))
+        temp_output_image_path: Optional[str] = None
+        if not dry_run:
+            os.makedirs(os.path.dirname(output_image_path) or ".", exist_ok=True)
+            temp_output_image_path = os.path.join(work_dir, os.path.basename(output_image_path))
         if output_on_moving_grid:
             out_profile = _make_output_profile(
                 moving_src.profile,
@@ -920,162 +961,223 @@ def align_image_pair(
             target_row_splits = _split_positions(int(fixed_window.height), target_rows)
             target_col_splits = _split_positions(int(fixed_window.width), target_cols)
 
-        with rasterio.open(temp_output_image_path, "w+", **out_profile) as out_dst:
-            try:
-                out_dst.colorinterp = moving_src.colorinterp
-            except Exception:
-                pass
-            try:
-                out_dst.scales = moving_src.scales
-                out_dst.offsets = moving_src.offsets
-            except Exception:
-                pass
-            for b in range(1, moving_src.count + 1):
-                desc = moving_src.descriptions[b - 1]
-                if desc:
-                    out_dst.set_band_description(b, desc)
-                band_tags = moving_src.tags(b).copy()
-                for k in list(band_tags.keys()):
-                    if k.upper().startswith("STATISTICS_"):
-                        band_tags.pop(k, None)
-                out_dst.update_tags(b, **band_tags)
-                out_dst.update_tags(
-                    b,
-                    STATISTICS_MINIMUM="",
-                    STATISTICS_MAXIMUM="",
-                    STATISTICS_MEAN="",
-                    STATISTICS_STDDEV="",
-                )
-
-            if output_on_moving_grid:
-                for b in range(1, moving_src.count + 1):
-                    for _, block_window in out_dst.block_windows(b):
-                        out_dst.write(
-                            moving_src.read(b, window=block_window).astype(out_profile["dtype"]),
-                            b,
-                            window=block_window,
-                        )
-            else:
-                for b in range(1, moving_src.count + 1):
-                    for _, block_window in out_dst.block_windows(b):
-                        out_dst.write(
-                            np.full(
-                                (int(block_window.height), int(block_window.width)),
-                                out_nodata,
-                                dtype=out_profile["dtype"],
-                            ),
-                            b,
-                            window=block_window,
-                        )
-
-            for b in range(1, moving_src.count + 1):
-                block_width, block_height = out_dst.block_shapes[b - 1]
-                for row_idx in range(target_rows):
-                    for col_idx in range(target_cols):
-                        core_window = Window(
-                            col_off=target_col_splits[col_idx],
-                            row_off=target_row_splits[row_idx],
-                            width=target_col_splits[col_idx + 1] - target_col_splits[col_idx],
-                            height=target_row_splits[row_idx + 1] - target_row_splits[row_idx],
-                        )
-                        if core_window.width <= 0 or core_window.height <= 0:
-                            continue
-                        if output_on_moving_grid:
-                            target_world_transform = moving_src.transform
-                            target_abs_window = _window_in_parent(moving_window, core_window)
-                            target_out_window = target_abs_window
-                        else:
-                            target_world_transform = fixed_src.transform
-                            target_abs_window = _window_in_parent(fixed_window, core_window)
-                            target_out_window = core_window
-                        source_window = _source_window_for_target_window(
-                            target_abs_window,
-                            target_world_transform,
-                            moving_src.transform,
-                            global_transform,
-                            moving_src.width,
-                            moving_src.height,
-                        )
-                        if source_window.width <= 0 or source_window.height <= 0:
-                            continue
-                        moving_band_data = moving_src.read(b, window=source_window).astype(np.float32)
-                        moving_band_valid = moving_src.read_masks(b, window=source_window).astype(np.float32)
-                        if moving_nodata_value is not None:
-                            moving_band_valid *= (moving_band_data != moving_nodata_value).astype(np.float32)
-                        source_transform = moving_src.window_transform(source_window)
-
-                        core_row0 = int(core_window.row_off)
-                        core_col0 = int(core_window.col_off)
-                        core_row1 = core_row0 + int(core_window.height)
-                        core_col1 = core_col0 + int(core_window.width)
-                        for row_off in range(core_row0, core_row1, int(block_height)):
-                            for col_off in range(core_col0, core_col1, int(block_width)):
-                                win_w = min(int(block_width), core_col1 - col_off)
-                                win_h = min(int(block_height), core_row1 - row_off)
-                                block_window = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
-                                if output_on_moving_grid:
-                                    target_block_abs = _window_in_parent(moving_window, block_window)
-                                    target_block_out = target_block_abs
-                                else:
-                                    target_block_abs = _window_in_parent(fixed_window, block_window)
-                                    target_block_out = block_window
-                                block_transform = rasterio.windows.transform(target_block_abs, target_world_transform)
-                                x_world, y_world = _pixel_centers_world(block_transform, win_h, win_w)
-                                solve_rows_block, solve_cols_block = _world_to_array_coords(
-                                    solve_transform,
-                                    x_world,
-                                    y_world,
-                                )
-                                target_valid = (
-                                    (solve_rows_block >= 0.0)
-                                    & (solve_rows_block <= solve_height - 1)
-                                    & (solve_cols_block >= 0.0)
-                                    & (solve_cols_block <= solve_width - 1)
-                                )
-                                source_x_world, source_y_world = _apply_world_transform(
-                                    global_transform,
-                                    x_world,
-                                    y_world,
-                                )
-                                source_rows, source_cols = _world_to_array_coords(
-                                    source_transform,
-                                    source_x_world,
-                                    source_y_world,
-                                )
-                                remapped_block, moving_valid = _sample_bilinear(
-                                    moving_band_data,
-                                    source_rows,
-                                    source_cols,
-                                    fill_value=out_nodata,
-                                )
-                                sampled_mask, mask_valid = _sample_bilinear(
-                                    moving_band_valid,
-                                    source_rows,
-                                    source_cols,
-                                    fill_value=0.0,
-                                )
-                                valid = target_valid & moving_valid & mask_valid & (sampled_mask > 0.0)
-                                combined = np.where(valid, remapped_block, out_nodata)
-                                out_dst.write(
-                                    combined.astype(out_profile["dtype"]),
-                                    b,
-                                    window=target_block_out,
-                                )
-
-        if trim_edge_invalid:
-            from coregix.postprocess import trim_edge_invalid_pixels
-
-            trim_edge_invalid_pixels(
-                input_image_path=temp_output_image_path,
+        transform_metadata: Optional[dict[str, object]] = None
+        if output_transform_json_path is not None:
+            metadata = base_transform_metadata(
+                moving_image_path=moving_image_path,
+                fixed_image_path=fixed_image_path,
                 output_image_path=output_image_path,
-                edge_depth=edge_trim_depth,
-                detection_band_index=edge_trim_detection_band_index,
-                invalid_below=edge_trim_invalid_below,
-                invalid_above=edge_trim_invalid_above,
-                nodata_value=out_nodata,
+                output_transform_json_path=output_transform_json_path,
+                moving_band_index=moving_band_1based - 1,
+                fixed_band_index=fixed_band_1based - 1,
+                split_factor=split_factor,
+                solve_resolution=solve_resolution,
+                solve_resolutions=solve_resolutions,
+                output_on_moving_grid=output_on_moving_grid,
+                clip_fixed_to_moving=clip_fixed_to_moving,
+                enforce_mutual_valid_mask=enforce_mutual_valid_mask,
+                use_edge_proxies=use_edge_proxies,
+                moving_nodata=moving_nodata_value,
+                fixed_nodata=fixed_nodata_value,
+                output_nodata=out_nodata,
+                fixed_crs=fixed_src.crs,
+                moving_crs=moving_src.crs,
+                fixed_width=fixed_src.width,
+                fixed_height=fixed_src.height,
+                fixed_transform=fixed_src.transform,
+                moving_width=moving_src.width,
+                moving_height=moving_src.height,
+                moving_transform=moving_src.transform,
+                output_width=int(out_profile["width"]),
+                output_height=int(out_profile["height"]),
+                output_transform=out_profile["transform"],
+                fixed_window=fixed_window,
+                moving_window=moving_window,
+                fixed_window_transform=fixed_window_transform,
+                moving_window_transform=moving_window_transform,
+                solve_width=int(solve_width),
+                solve_height=int(solve_height),
+                solve_transform=solve_transform,
             )
+            metadata["transform_model"] = "global_rigid_from_chunk_correspondences"
+            metadata["passes"] = pass_summaries
+            metadata["global_rigid"] = {
+                "rotation": [[float(value) for value in row] for row in global_transform.rotation],
+                "translation": [float(value) for value in global_transform.translation],
+            }
+            add_matrix_metadata(
+                metadata,
+                matrix_from_rotation_translation(
+                    global_transform.rotation,
+                    global_transform.translation,
+                ),
+            )
+            transform_metadata = metadata
+
+        if not dry_run:
+            with rasterio.open(temp_output_image_path, "w+", **out_profile) as out_dst:
+                try:
+                    out_dst.colorinterp = moving_src.colorinterp
+                except Exception:
+                    pass
+                try:
+                    out_dst.scales = moving_src.scales
+                    out_dst.offsets = moving_src.offsets
+                except Exception:
+                    pass
+                for b in range(1, moving_src.count + 1):
+                    desc = moving_src.descriptions[b - 1]
+                    if desc:
+                        out_dst.set_band_description(b, desc)
+                    band_tags = moving_src.tags(b).copy()
+                    for k in list(band_tags.keys()):
+                        if k.upper().startswith("STATISTICS_"):
+                            band_tags.pop(k, None)
+                    out_dst.update_tags(b, **band_tags)
+                    out_dst.update_tags(
+                        b,
+                        STATISTICS_MINIMUM="",
+                        STATISTICS_MAXIMUM="",
+                        STATISTICS_MEAN="",
+                        STATISTICS_STDDEV="",
+                    )
+
+                if output_on_moving_grid:
+                    for b in range(1, moving_src.count + 1):
+                        for _, block_window in out_dst.block_windows(b):
+                            out_dst.write(
+                                moving_src.read(b, window=block_window).astype(out_profile["dtype"]),
+                                b,
+                                window=block_window,
+                            )
+                else:
+                    for b in range(1, moving_src.count + 1):
+                        for _, block_window in out_dst.block_windows(b):
+                            out_dst.write(
+                                np.full(
+                                    (int(block_window.height), int(block_window.width)),
+                                    out_nodata,
+                                    dtype=out_profile["dtype"],
+                                ),
+                                b,
+                                window=block_window,
+                            )
+
+                for b in range(1, moving_src.count + 1):
+                    block_width, block_height = out_dst.block_shapes[b - 1]
+                    for row_idx in range(target_rows):
+                        for col_idx in range(target_cols):
+                            core_window = Window(
+                                col_off=target_col_splits[col_idx],
+                                row_off=target_row_splits[row_idx],
+                                width=target_col_splits[col_idx + 1] - target_col_splits[col_idx],
+                                height=target_row_splits[row_idx + 1] - target_row_splits[row_idx],
+                            )
+                            if core_window.width <= 0 or core_window.height <= 0:
+                                continue
+                            if output_on_moving_grid:
+                                target_world_transform = moving_src.transform
+                                target_abs_window = _window_in_parent(moving_window, core_window)
+                                target_out_window = target_abs_window
+                            else:
+                                target_world_transform = fixed_src.transform
+                                target_abs_window = _window_in_parent(fixed_window, core_window)
+                                target_out_window = core_window
+                            source_window = _source_window_for_target_window(
+                                target_abs_window,
+                                target_world_transform,
+                                moving_src.transform,
+                                global_transform,
+                                moving_src.width,
+                                moving_src.height,
+                            )
+                            if source_window.width <= 0 or source_window.height <= 0:
+                                continue
+                            moving_band_data = moving_src.read(b, window=source_window).astype(np.float32)
+                            moving_band_valid = moving_src.read_masks(b, window=source_window).astype(np.float32)
+                            if moving_nodata_value is not None:
+                                moving_band_valid *= (moving_band_data != moving_nodata_value).astype(np.float32)
+                            source_transform = moving_src.window_transform(source_window)
+
+                            core_row0 = int(core_window.row_off)
+                            core_col0 = int(core_window.col_off)
+                            core_row1 = core_row0 + int(core_window.height)
+                            core_col1 = core_col0 + int(core_window.width)
+                            for row_off in range(core_row0, core_row1, int(block_height)):
+                                for col_off in range(core_col0, core_col1, int(block_width)):
+                                    win_w = min(int(block_width), core_col1 - col_off)
+                                    win_h = min(int(block_height), core_row1 - row_off)
+                                    block_window = Window(col_off=col_off, row_off=row_off, width=win_w, height=win_h)
+                                    if output_on_moving_grid:
+                                        target_block_abs = _window_in_parent(moving_window, block_window)
+                                        target_block_out = target_block_abs
+                                    else:
+                                        target_block_abs = _window_in_parent(fixed_window, block_window)
+                                        target_block_out = block_window
+                                    block_transform = rasterio.windows.transform(target_block_abs, target_world_transform)
+                                    x_world, y_world = _pixel_centers_world(block_transform, win_h, win_w)
+                                    solve_rows_block, solve_cols_block = _world_to_array_coords(
+                                        solve_transform,
+                                        x_world,
+                                        y_world,
+                                    )
+                                    target_valid = (
+                                        (solve_rows_block >= 0.0)
+                                        & (solve_rows_block <= solve_height - 1)
+                                        & (solve_cols_block >= 0.0)
+                                        & (solve_cols_block <= solve_width - 1)
+                                    )
+                                    source_x_world, source_y_world = _apply_world_transform(
+                                        global_transform,
+                                        x_world,
+                                        y_world,
+                                    )
+                                    source_rows, source_cols = _world_to_array_coords(
+                                        source_transform,
+                                        source_x_world,
+                                        source_y_world,
+                                    )
+                                    remapped_block, moving_valid = _sample_bilinear(
+                                        moving_band_data,
+                                        source_rows,
+                                        source_cols,
+                                        fill_value=out_nodata,
+                                    )
+                                    sampled_mask, mask_valid = _sample_bilinear(
+                                        moving_band_valid,
+                                        source_rows,
+                                        source_cols,
+                                        fill_value=0.0,
+                                    )
+                                    valid = target_valid & moving_valid & mask_valid & (sampled_mask > 0.0)
+                                    combined = np.where(valid, remapped_block, out_nodata)
+                                    out_dst.write(
+                                        combined.astype(out_profile["dtype"]),
+                                        b,
+                                        window=target_block_out,
+                                    )
+
+        if dry_run:
+            if transform_metadata is not None:
+                write_transform_metadata(output_transform_json_path, transform_metadata)
         else:
-            shutil.copyfile(temp_output_image_path, output_image_path)
+            if trim_edge_invalid:
+                from coregix.postprocess import trim_edge_invalid_pixels
+
+                trim_edge_invalid_pixels(
+                    input_image_path=temp_output_image_path,
+                    output_image_path=output_image_path,
+                    edge_depth=edge_trim_depth,
+                    detection_band_index=edge_trim_detection_band_index,
+                    invalid_below=edge_trim_invalid_below,
+                    invalid_above=edge_trim_invalid_above,
+                    nodata_value=out_nodata,
+                )
+            else:
+                shutil.copyfile(temp_output_image_path, output_image_path)
+
+            if transform_metadata is not None:
+                write_transform_metadata(output_transform_json_path, transform_metadata)
 
     if temp_ctx is not None:
         temp_ctx.cleanup()
@@ -1084,6 +1186,9 @@ def align_image_pair(
         kept_temp = work_dir
 
     return AlignmentResult(
-        output_image_path=output_image_path,
+        output_image_path=None if dry_run else output_image_path,
         temp_dir=kept_temp,
+        output_transform_json_path=output_transform_json_path,
+        transform_metadata=transform_metadata,
+        dry_run=dry_run,
     )

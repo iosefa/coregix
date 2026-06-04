@@ -55,3 +55,5 @@ testpaths = ["tests"]
 
 [project.scripts]
 align-image-pair = "coregix.cli.align_image_pair:main"
+apply-coregix-transform = "coregix.cli.apply_coregix_transform:main"
+evaluate-vector-alignment = "coregix.cli.evaluate_vector_alignment:main"

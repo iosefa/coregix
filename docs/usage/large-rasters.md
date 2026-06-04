@@ -59,7 +59,7 @@ align-image-pair \
 
 Each pass refines the previous transform, and the final raster is sampled once from the original source image. This can make large-offset alignments more stable without stacking multiple resampling steps. Use `--split-factor 0` for a whole-image multi-pass solve when memory permits; use higher split factors to reduce memory pressure on large rasters.
 
-`--solve-resolution` is deprecated and remains available only for single-pass compatibility. Prefer `--solve-resolutions`, even for one solve, for example `--solve-resolutions 2.0`.
+`--solve-resolution` is deprecated and remains available only for single-pass compatibility. Prefer `--solve-resolutions`, even for one solve, for example `--solve-resolutions 2.0`. The experimental `--transform-model bspline` mode supports a single solve resolution only; multi-pass solve sequences are not supported.
 
 ## Manual Coarse-to-fine Alignment
 
@@ -81,4 +81,20 @@ Chunked output follows the same grid rules as standard alignment:
 - band metadata and descriptions are copied from the source raster when possible
 - output nodata defaults to source nodata, then reference nodata, then `0`
 
-Chunking changes how the transform is estimated and applied internally; it does not change the output file format or the public API.
+Chunking changes how the transform is estimated and applied internally; it does not change the output file format or the public API. Chunking is supported only by the default rigid workflow. The experimental `--transform-model bspline` mode requires `--split-factor 0`.
+
+## Dry-Run Parameter Checks
+
+For expensive large-raster runs, dry-run mode can estimate the transform without writing the aligned raster:
+
+```bash
+align-image-pair \
+  --moving-image /path/to/source_large.tif \
+  --fixed-image /path/to/reference.tif \
+  --output-transform-json /path/to/transform.coregix.json \
+  --split-factor 2 \
+  --solve-resolutions 8,4,1 \
+  --dry-run
+```
+
+This is opt-in. Without `--dry-run`, Coregix follows the normal workflow and writes `--output-image`. Pair this with [Vector Alignment Evaluation](vector-alignment.md) when you want to test parameter candidates before writing a large output raster. If a dry-run transform passes QA, write the raster with `apply-coregix-transform` to avoid rerunning registration.

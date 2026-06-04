@@ -26,17 +26,8 @@ def mocked_identity_registration(monkeypatch: pytest.MonkeyPatch):
         with rasterio.open(reference_image_path) as src:
             return np.zeros((src.height, src.width, 2), dtype=np.float32)
 
-    def fake_apply_elastix_transform_array(
-        moving_image,
-        transform_parameter_object,
-        *,
-        log_to_console=False,
-    ):
-        return np.asarray(moving_image, dtype=np.float32)
-
     monkeypatch.setattr(alignment, "estimate_elastix_transform", fake_estimate_elastix_transform)
     monkeypatch.setattr(alignment, "deformation_field_from_transform", fake_deformation_field_from_transform)
-    monkeypatch.setattr(alignment, "apply_elastix_transform_array", fake_apply_elastix_transform_array)
     return calls
 
 
@@ -76,6 +67,90 @@ def test_align_image_pair_identity_transform_preserves_source_grid(
 
     with rasterio.open(f"{result.temp_dir}/fixed_mask.tif") as mask_src:
         assert int(mask_src.read(1).sum()) == 64
+
+
+def test_align_image_pair_bspline_uses_nonrigid_parameter_maps(
+    tmp_path,
+    mocked_identity_registration,
+) -> None:
+    transform = from_origin(100.0, 200.0, 1.0, 1.0)
+    data = np.arange(64, dtype=np.int16).reshape(8, 8)
+    moving_path = write_test_raster(tmp_path / "source.tif", data, transform=transform)
+    fixed_path = write_test_raster(tmp_path / "reference.tif", data, transform=transform)
+    output_path = tmp_path / "aligned_bspline.tif"
+
+    result = alignment.align_image_pair(
+        moving_image_path=str(moving_path),
+        fixed_image_path=str(fixed_path),
+        output_image_path=str(output_path),
+        temp_dir=str(tmp_path),
+        keep_temp_dir=True,
+        use_edge_proxies=False,
+        transform_model="bspline",
+        solve_resolutions=[2.0],
+    )
+
+    assert mocked_identity_registration["estimate"][0]["parameter_map"] == [
+        "translation",
+        "rigid",
+        "bspline",
+    ]
+    assert result.temp_dir is not None
+    with rasterio.open(f"{result.temp_dir}/fixed_reg.tif") as src:
+        assert (src.width, src.height) == (4, 4)
+
+
+def test_align_image_pair_rejects_unknown_transform_model() -> None:
+    with pytest.raises(ValueError, match="transform_model"):
+        alignment.align_image_pair(
+            "moving.tif",
+            "fixed.tif",
+            "out.tif",
+            transform_model="affine",
+        )
+
+
+def test_align_image_pair_bspline_rejects_dry_run_before_json_requirement() -> None:
+    with pytest.raises(ValueError, match="dry_run is not supported"):
+        alignment.align_image_pair(
+            "moving.tif",
+            "fixed.tif",
+            transform_model="bspline",
+            dry_run=True,
+        )
+
+
+def test_align_image_pair_bspline_rejects_transform_json(tmp_path) -> None:
+    with pytest.raises(ValueError, match="output_transform_json_path"):
+        alignment.align_image_pair(
+            "moving.tif",
+            "fixed.tif",
+            "out.tif",
+            transform_model="bspline",
+            output_transform_json_path=str(tmp_path / "transform.json"),
+        )
+
+
+def test_align_image_pair_bspline_rejects_split_factor() -> None:
+    with pytest.raises(ValueError, match="split_factor"):
+        alignment.align_image_pair(
+            "moving.tif",
+            "fixed.tif",
+            "out.tif",
+            transform_model="bspline",
+            split_factor=1,
+        )
+
+
+def test_align_image_pair_bspline_rejects_multi_pass_solve_resolutions() -> None:
+    with pytest.raises(ValueError, match="multi-pass"):
+        alignment.align_image_pair(
+            "moving.tif",
+            "fixed.tif",
+            "out.tif",
+            transform_model="bspline",
+            solve_resolutions=[6.0, 2.0],
+        )
 
 
 def test_align_image_pair_can_write_reference_grid_output(

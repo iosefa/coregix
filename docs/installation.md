@@ -112,3 +112,8 @@ mkdocs build
 ```
 
 The generated HTML is written to `site/`.
+
+
+## Vector Evaluation Support
+
+The optional `evaluate-vector-alignment` command reads vector files through GDAL/OGR. If your environment does not provide the `osgeo` Python bindings, install GDAL through your environment manager before using vector evaluation. Conda environments usually handle this more reliably than a standalone pip install.

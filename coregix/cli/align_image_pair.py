@@ -35,7 +35,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--moving-image", required=True, help="Path to source raster that will be transformed.")
     parser.add_argument("--fixed-image", required=True, help="Path to reference raster used for alignment.")
-    parser.add_argument("--output-image", required=True, help="Path to output coregistered raster.")
+    parser.add_argument("--output-image", help="Path to output coregistered raster. Required unless --dry-run is used.")
+    parser.add_argument(
+        "--output-transform-json",
+        help=(
+            "Optional path for a JSON sidecar describing the final coordinate transform. "
+            "The JSON includes target_to_source and source_to_target CRS-coordinate matrices."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Estimate the transform and write --output-transform-json without writing "
+            "an aligned output raster. Requires --output-transform-json."
+        ),
+    )
     parser.add_argument(
         "--band-index",
         type=int,
@@ -58,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help=(
             "Use edge-proxy images rather than raw intensities for registration."
+        ),
+    )
+    parser.add_argument(
+        "--transform-model",
+        choices=("rigid", "bspline"),
+        default="rigid",
+        help=(
+            "Registration transform model. 'rigid' is the default global "
+            "translation/rotation model. 'bspline' is experimental nonrigid "
+            "alignment and supports only single-pass raster output."
         ),
     )
     parser.add_argument(
@@ -187,6 +212,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error(f"--moving-image does not exist: {args.moving_image}")
     if not os.path.isfile(args.fixed_image):
         parser.error(f"--fixed-image does not exist: {args.fixed_image}")
+    if args.dry_run and args.output_transform_json is None:
+        parser.error("--dry-run requires --output-transform-json.")
+    if not args.dry_run and args.output_image is None:
+        parser.error("--output-image is required unless --dry-run is used.")
     if args.band_index < 0:
         parser.error("--band-index must be >= 0.")
     if args.moving_band_index is not None and args.moving_band_index < 0:
@@ -205,6 +234,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.error("--edge-trim-depth must be > 0.")
     if args.edge_trim_detection_band_index < 0:
         parser.error("--edge-trim-detection-band-index must be >= 0.")
+    if args.transform_model == "bspline":
+        if args.dry_run:
+            parser.error("--transform-model bspline cannot be used with --dry-run.")
+        if args.output_transform_json is not None:
+            parser.error("--transform-model bspline cannot write --output-transform-json.")
+        if args.split_factor != 0:
+            parser.error("--transform-model bspline requires --split-factor 0.")
+        if args.solve_resolutions is not None and len(args.solve_resolutions) > 1:
+            parser.error("--transform-model bspline supports only one solve resolution.")
 
     result = align_image_pair(
         moving_image_path=args.moving_image,
@@ -232,6 +270,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         split_factor=args.split_factor,
         solve_resolution=args.solve_resolution,
         solve_resolutions=args.solve_resolutions,
+        transform_model=args.transform_model,
+        output_transform_json_path=args.output_transform_json,
+        dry_run=args.dry_run,
     )
 
     print(
@@ -239,6 +280,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             {
                 "output_image_path": result.output_image_path,
                 "temp_dir": result.temp_dir,
+                "output_transform_json_path": result.output_transform_json_path,
+                "dry_run": result.dry_run,
             },
             indent=2,
         )

@@ -43,9 +43,12 @@ nav:
     - Usage:
         - Align Image Pairs: usage/alignment.md
         - Large Rasters: usage/large-rasters.md
+        - Vector Alignment Evaluation: usage/vector-alignment.md
         - Edge Trimming: usage/edge-trimming.md
     - API Reference:
         - Overview: api/index.md
         - Alignment: api/alignment.md
+        - Apply Transform: api/apply-transform.md
+        - Evaluation: api/evaluation.md
         - Edge Trimming: api/edge-trimming.md
         - Advanced Registration: api/registration.md
