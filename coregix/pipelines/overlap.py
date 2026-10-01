@@ -31,4 +31,4 @@ def handle_non_overlap(moving_image_path, fixed_image_path, output_image_path, *
         os.makedirs(os.path.dirname(output_image_path) or ".", exist_ok=True)
         # GDAL's raster copy retains external masks and metadata as well as pixels.
         with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True):
-            copy_raster(moving_image_path, output_image_path, driver="GTiff", copy_src_overviews=True)
+            copy_raster(moving_image_path, output_image_path, driver="GTiff")

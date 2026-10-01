@@ -75,7 +75,13 @@ def test_skip_preserves_source_at_requested_output(tmp_path, monkeypatch, split_
         assert dst.tags(1) == src.tags(1)
         assert dst.descriptions == src.descriptions
         assert dst.scales == src.scales and dst.offsets == src.offsets
-        assert dst.overviews(1) == src.overviews(1)
+        assert src.overviews(1) == [2]
+        assert dst.overviews(1) == []
+    # The workflow must be able to add overviews without overriding COG protection.
+    with rasterio.open(output, "r+") as dst:
+        dst.build_overviews([2], rasterio.enums.Resampling.nearest)
+    with rasterio.open(output) as dst:
+        assert dst.overviews(1) == [2]
 
 
 @pytest.mark.parametrize("split_factor", [0, 1])
