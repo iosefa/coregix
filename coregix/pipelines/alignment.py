@@ -15,6 +15,8 @@ from rasterio.enums import Resampling
 from rasterio.warp import reproject
 from rasterio.windows import Window, from_bounds
 
+from coregix.pipelines.overlap import InsufficientOverlapError, handle_non_overlap
+
 from coregix.preprocess.registration import (
     apply_elastix_transform_array,
     deformation_field_from_transform,
@@ -284,6 +286,7 @@ def align_image_pair(
     fixed_nodata: Optional[float] = None,
     output_nodata: Optional[float] = None,
     min_valid_fraction: float = 0.01,
+    warn_and_skip_non_overlap_images: bool = False,
     temp_dir: Optional[str] = None,
     keep_temp_dir: bool = False,
     log_to_console: bool = False,
@@ -323,6 +326,11 @@ def align_image_pair(
         output_nodata: Optional output nodata override. Defaults to source nodata,
             then reference nodata, else ``0``.
         min_valid_fraction: Minimum valid-mask fraction required in the registration ROI.
+        warn_and_skip_non_overlap_images: If ``True``, warn and copy the unchanged
+            source raster to ``output_image_path`` when bounds do not overlap or
+            usable coverage is below ``min_valid_fraction``. The fallback preserves
+            the source grid, pixels, masks, and metadata; output nodata overrides
+            and edge trimming do not apply. Defaults to ``False`` (raise).
         temp_dir: Optional parent directory for temporary working artifacts.
         keep_temp_dir: If ``True``, keep the temporary working directory for inspection.
         log_to_console: If ``True``, emit registration backend logs to stdout.
@@ -400,6 +408,7 @@ def align_image_pair(
             fixed_nodata=fixed_nodata,
             output_nodata=output_nodata,
             min_valid_fraction=min_valid_fraction,
+            warn_and_skip_non_overlap_images=warn_and_skip_non_overlap_images,
             temp_dir=temp_dir,
             keep_temp_dir=keep_temp_dir,
             log_to_console=log_to_console,
@@ -427,7 +436,10 @@ def align_image_pair(
         temp_ctx = tempfile.TemporaryDirectory(prefix="vhr_align_", dir=temp_dir)
         work_dir = temp_ctx.name
 
-    with rasterio.open(fixed_image_path) as fixed_src, rasterio.open(moving_image_path) as moving_src:
+    with handle_non_overlap(
+        moving_image_path, fixed_image_path, output_image_path,
+        enabled=warn_and_skip_non_overlap_images,
+    ), rasterio.open(fixed_image_path) as fixed_src, rasterio.open(moving_image_path) as moving_src:
         moving_band_1based = (moving_band_index if moving_band_index is not None else band_index) + 1
         fixed_band_1based = (fixed_band_index if fixed_band_index is not None else band_index) + 1
         if fixed_band_1based > fixed_src.count:
@@ -471,7 +483,7 @@ def align_image_pair(
                 max_height=fixed_src.height,
             )
             if fixed_domain_window.width <= 0 or fixed_domain_window.height <= 0:
-                raise ValueError(
+                raise InsufficientOverlapError(
                     "No overlap between source-raster bounds and reference-raster grid."
                 )
         else:
@@ -520,7 +532,7 @@ def align_image_pair(
             max_height=moving_src.height,
         )
         if moving_window.width <= 0 or moving_window.height <= 0:
-            raise ValueError("No overlap between reference-raster ROI and source-raster grid.")
+            raise InsufficientOverlapError("No overlap between reference-raster ROI and source-raster grid.")
         moving_window_transform = moving_src.window_transform(moving_window)
         solve_width, solve_height, solve_transform = _resolve_solve_grid(
             base_transform=fixed_window_transform,
@@ -659,9 +671,9 @@ def align_image_pair(
 
             min_valid_pixels = int(max(1, min_valid_fraction * (solve_width * solve_height)))
             if int(fixed_mask_for_elastix.sum()) < min_valid_pixels:
-                raise ValueError("Insufficient valid reference-raster support in the registration ROI.")
+                raise InsufficientOverlapError("Insufficient valid reference-raster support in the registration ROI.")
             if int(moving_mask_for_elastix.sum()) < min_valid_pixels:
-                raise ValueError("Insufficient valid source-raster support in the registration ROI.")
+                raise InsufficientOverlapError("Insufficient valid source-raster support in the registration ROI.")
 
             fixed_reg_path = os.path.join(work_dir, "fixed_reg.tif")
             moving_reg_path = os.path.join(work_dir, "moving_reg.tif")

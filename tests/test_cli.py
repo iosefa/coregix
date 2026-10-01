@@ -35,6 +35,7 @@ def test_align_parser_defaults_use_current_registration_policy() -> None:
     assert args.output_on_moving_grid is True
     assert args.enforce_mutual_valid_mask is True
     assert args.split_factor == 0
+    assert args.warn_and_skip_non_overlap_images is False
 
 
 def test_align_parser_boolean_flags_can_be_disabled() -> None:
@@ -117,6 +118,7 @@ def test_align_cli_forwards_arguments_and_prints_json(
             "-3000",
             "--no-output-on-moving-grid",
             "--no-use-edge-proxies",
+            "--warn-and-skip-non-overlap-images",
         ]
     )
 
@@ -134,6 +136,7 @@ def test_align_cli_forwards_arguments_and_prints_json(
     assert captured_kwargs["edge_trim_invalid_below"] == -3000
     assert captured_kwargs["output_on_moving_grid"] is False
     assert captured_kwargs["use_edge_proxies"] is False
+    assert captured_kwargs["warn_and_skip_non_overlap_images"] is True
 
     summary = json.loads(capsys.readouterr().out)
     assert summary == {"output_image_path": str(output), "temp_dir": None}

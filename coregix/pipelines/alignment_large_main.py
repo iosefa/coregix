@@ -15,6 +15,8 @@ from rasterio.enums import Resampling
 from rasterio.warp import reproject
 from rasterio.windows import Window, from_bounds
 
+from coregix.pipelines.overlap import InsufficientOverlapError, handle_non_overlap
+
 from coregix.preprocess.registration import (
     estimate_elastix_transform,
 )
@@ -503,7 +505,7 @@ def _estimate_chunk_correspondences(
         max_height=int(fixed_window.height),
     )
     if fixed_chunk_rel.width <= 0 or fixed_chunk_rel.height <= 0:
-        return None
+        raise InsufficientOverlapError("No reference-raster coverage in the solve chunk.")
 
     fixed_chunk_abs = _window_in_parent(fixed_window, fixed_chunk_rel)
     fixed_band = fixed_src.read(fixed_band_1based, window=fixed_chunk_abs)
@@ -556,7 +558,7 @@ def _estimate_chunk_correspondences(
             max_height=moving_src.height,
         )
         if moving_chunk_abs.width <= 0 or moving_chunk_abs.height <= 0:
-            return None
+            raise InsufficientOverlapError("No source-raster coverage in the solve chunk.")
         moving_band = moving_src.read(moving_band_1based, window=moving_chunk_abs)
         moving_valid = moving_src.read_masks(moving_band_1based, window=moving_chunk_abs) > 0
         if moving_nodata_value is not None:
@@ -615,9 +617,9 @@ def _estimate_chunk_correspondences(
 
     min_valid_pixels = int(max(1, min_valid_fraction * (solve_width * solve_height)))
     if int(fixed_mask_for_elastix.sum()) < min_valid_pixels:
-        return None
+        raise InsufficientOverlapError("Insufficient valid reference-raster support in the solve chunk.")
     if int(moving_mask_for_elastix.sum()) < min_valid_pixels:
-        return None
+        raise InsufficientOverlapError("Insufficient valid source-raster support in the solve chunk.")
 
     fixed_reg_path = os.path.join(work_dir, f"{chunk_id}_fixed_reg.tif")
     moving_reg_path = os.path.join(work_dir, f"{chunk_id}_moving_reg.tif")
@@ -708,6 +710,7 @@ def align_image_pair(
     fixed_nodata: Optional[float] = None,
     output_nodata: Optional[float] = None,
     min_valid_fraction: float = 0.01,
+    warn_and_skip_non_overlap_images: bool = False,
     temp_dir: Optional[str] = None,
     keep_temp_dir: bool = False,
     log_to_console: bool = False,
@@ -759,7 +762,10 @@ def align_image_pair(
         temp_ctx = tempfile.TemporaryDirectory(prefix="vhr_align_", dir=temp_dir)
         work_dir = temp_ctx.name
 
-    with rasterio.open(fixed_image_path) as fixed_src, rasterio.open(moving_image_path) as moving_src:
+    with handle_non_overlap(
+        moving_image_path, fixed_image_path, output_image_path,
+        enabled=warn_and_skip_non_overlap_images,
+    ), rasterio.open(fixed_image_path) as fixed_src, rasterio.open(moving_image_path) as moving_src:
         moving_band_1based = (moving_band_index if moving_band_index is not None else band_index) + 1
         fixed_band_1based = (fixed_band_index if fixed_band_index is not None else band_index) + 1
         if fixed_band_1based > fixed_src.count:
@@ -804,7 +810,7 @@ def align_image_pair(
                 max_height=fixed_src.height,
             )
             if fixed_window.width <= 0 or fixed_window.height <= 0:
-                raise ValueError("No overlap between source-raster bounds and reference-raster grid.")
+                raise InsufficientOverlapError("No overlap between source-raster bounds and reference-raster grid.")
         else:
             fixed_window = Window(col_off=0, row_off=0, width=fixed_src.width, height=fixed_src.height)
 
@@ -822,7 +828,7 @@ def align_image_pair(
             max_height=moving_src.height,
         )
         if moving_window.width <= 0 or moving_window.height <= 0:
-            raise ValueError("No overlap between reference-raster ROI and source-raster grid.")
+            raise InsufficientOverlapError("No overlap between reference-raster ROI and source-raster grid.")
         moving_window_transform = moving_src.window_transform(moving_window)
 
         global_transform = _identity_transform()
@@ -840,6 +846,7 @@ def align_image_pair(
             solve_row_splits = _split_positions(solve_height, solve_rows)
             solve_col_splits = _split_positions(solve_width, solve_cols)
 
+            supported_chunk = False
             target_points: list[np.ndarray] = []
             source_points: list[np.ndarray] = []
             for row_idx in range(solve_rows):
@@ -858,27 +865,31 @@ def align_image_pair(
                         solve_width,
                         solve_height,
                     )
-                    chunk_pairs = _estimate_chunk_correspondences(
-                        chunk_id=f"pass{pass_idx}_chunk_r{row_idx}_c{col_idx}",
-                        fixed_src=fixed_src,
-                        moving_src=moving_src,
-                        fixed_window=fixed_window,
-                        fixed_window_transform=fixed_window_transform,
-                        moving_band_1based=moving_band_1based,
-                        fixed_band_1based=fixed_band_1based,
-                        moving_nodata_value=moving_nodata_value,
-                        fixed_nodata_value=fixed_nodata_value,
-                        out_nodata=out_nodata,
-                        min_valid_fraction=min_valid_fraction,
-                        work_dir=work_dir,
-                        log_to_console=log_to_console,
-                        enforce_mutual_valid_mask=enforce_mutual_valid_mask,
-                        use_edge_proxies=use_edge_proxies,
-                        solve_transform=solve_transform,
-                        current_transform=global_transform,
-                        core_solve_window=core_solve_window,
-                        chunk_solve_window=chunk_solve_window,
-                    )
+                    try:
+                        chunk_pairs = _estimate_chunk_correspondences(
+                            chunk_id=f"pass{pass_idx}_chunk_r{row_idx}_c{col_idx}",
+                            fixed_src=fixed_src,
+                            moving_src=moving_src,
+                            fixed_window=fixed_window,
+                            fixed_window_transform=fixed_window_transform,
+                            moving_band_1based=moving_band_1based,
+                            fixed_band_1based=fixed_band_1based,
+                            moving_nodata_value=moving_nodata_value,
+                            fixed_nodata_value=fixed_nodata_value,
+                            out_nodata=out_nodata,
+                            min_valid_fraction=min_valid_fraction,
+                            work_dir=work_dir,
+                            log_to_console=log_to_console,
+                            enforce_mutual_valid_mask=enforce_mutual_valid_mask,
+                            use_edge_proxies=use_edge_proxies,
+                            solve_transform=solve_transform,
+                            current_transform=global_transform,
+                            core_solve_window=core_solve_window,
+                            chunk_solve_window=chunk_solve_window,
+                        )
+                    except InsufficientOverlapError:
+                        continue
+                    supported_chunk = True
                     if chunk_pairs is None:
                         continue
                     target_chunk_points, source_chunk_points = chunk_pairs
@@ -886,6 +897,8 @@ def align_image_pair(
                     source_points.append(source_chunk_points)
 
             if not target_points:
+                if not supported_chunk:
+                    raise InsufficientOverlapError("Insufficient valid overlap in all registration chunks.")
                 raise ValueError(
                     "No chunk produced a valid local solve. Try a lower split_factor or coarser solve_resolution."
                 )

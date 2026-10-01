@@ -130,6 +130,21 @@ align-image-pair \
 
 `--output-nodata` controls the value written into invalid output pixels.
 
+## Continue when overlap is insufficient
+
+Set `warn_and_skip_non_overlap_images=True` in Python or pass
+`--warn-and-skip-non-overlap-images` on the CLI to continue when the rasters have
+no spatial overlap or too few usable pixels for `min_valid_fraction`. Coregix
+emits a `RuntimeWarning` and copies the unchanged source to the requested output
+path. This retains its grid, pixels, masks, band metadata, and overviews; output
+grid/nodata overrides and edge trimming do not apply to this fallback.
+
+The default is `False`, which raises an error. With chunking, individual chunks
+without coverage remain excluded from the solve; the fallback applies when all
+chunks lack usable coverage. Registration backend failures and invalid inputs
+remain errors. A copied output has **not** been coregistered, even when its name
+ends in `_aligned.tif`.
+
 ## Debugging Registration
 
 Temporary registration images and masks are normally deleted after the command finishes. Keep them when diagnosing a failed or unexpected registration:

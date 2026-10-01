@@ -85,6 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional output nodata value. Defaults to source nodata, then reference nodata, else 0.",
     )
     parser.add_argument(
+        "--warn-and-skip-non-overlap-images",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Warn and copy the unchanged source to the output when valid overlap is insufficient.",
+    )
+    parser.add_argument(
         "--min-valid-fraction",
         type=float,
         default=0.01,
@@ -217,6 +223,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         fixed_nodata=args.fixed_nodata,
         output_nodata=args.output_nodata,
         min_valid_fraction=args.min_valid_fraction,
+        warn_and_skip_non_overlap_images=args.warn_and_skip_non_overlap_images,
         temp_dir=args.temp_dir,
         keep_temp_dir=args.keep_temp_dir,
         log_to_console=args.log_to_console,

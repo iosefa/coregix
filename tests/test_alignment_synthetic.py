@@ -40,9 +40,11 @@ def mocked_identity_registration(monkeypatch: pytest.MonkeyPatch):
     return calls
 
 
+@pytest.mark.parametrize("skip_non_overlap", [False, True])
 def test_align_image_pair_identity_transform_preserves_source_grid(
     tmp_path,
     mocked_identity_registration,
+    skip_non_overlap,
 ) -> None:
     transform = from_origin(100.0, 200.0, 1.0, 1.0)
     band1 = np.arange(64, dtype=np.int16).reshape(8, 8)
@@ -58,6 +60,7 @@ def test_align_image_pair_identity_transform_preserves_source_grid(
         output_image_path=str(output_path),
         temp_dir=str(tmp_path),
         keep_temp_dir=True,
+        warn_and_skip_non_overlap_images=skip_non_overlap,
         use_edge_proxies=False,
     )
 
