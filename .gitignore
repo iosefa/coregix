@@ -9,3 +9,7 @@ manuscript/
 deformationField.nii
 examples/
 site/
+
+# Generated package files and local experiment storage.
+/build/
+/experiments
