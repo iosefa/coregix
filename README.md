@@ -8,175 +8,111 @@
 [![Contributors](https://img.shields.io/github/contributors/iosefa/coregix.svg?label=contributors)](https://github.com/iosefa/coregix/graphs/contributors)
 [![License](https://img.shields.io/github/license/iosefa/coregix)](https://github.com/iosefa/coregix/blob/main/LICENSE)
 
-Coregix provides pairwise raster coregistration for geospatial imagery.
+Coregix aligns overlapping geospatial rasters through a Python API and command-line interface. Align one image to a fixed reference, or solve a network of overlapping images jointly using image-wide transforms and local deformation meshes.
 
-Coregix coregisters a source raster to a reference raster while preserving geospatial metadata and multi-band outputs. By default, it estimates a translation followed by a rigid transform using mutual-information optimization, then applies the resulting transform to produce a coregistered GeoTIFF.
+Tie points connect corresponding locations across images. Coregix first solves global corrections, then fits a local displacement mesh to the remaining offsets. The combined corrections are applied to every output band.
 
-Current scope:
-- pairwise GeoTIFF coregistration CLI and Python API
-- edge-proxy registration for cross-sensor structural alignment
-- chunked transform application for large source rasters
-- optional postprocess trimming of invalid edge artifacts
+- ORB feature matching and Elastix mutual-information matching
+- Global translation, similarity, and affine models
+- Bilinear and piecewise affine local deformation models
+- Fixed references, per-image movement weights, and robust tie-point losses
+- Reusable tie-point caches, GIS tie-point exports, and Cloud-Optimized GeoTIFF output
 
 ## Install
-
-### Conda environment
 
 ```bash
 conda env create -f environment.yml
 conda activate coregix
 ```
 
-This installs the runtime stack and the package in editable mode.
+This installs the runtime dependencies and Coregix in editable mode. Python 3.10 or later is required.
 
-### Editable install into an existing environment
+For an existing environment, install GDAL and matching Python bindings, then install from the repository root:
 
 ```bash
 pip install -e .
 ```
 
-The installed CLI entrypoint is:
+## Python usage
+
+Align an image to a fixed reference:
+
+```python
+from coregix import align_image_pair
+
+outputs = align_image_pair(
+    input_images=["source.tif"],
+    output_images=["aligned.tif"],
+    fixed_images=["reference.tif"],
+)
+
+print(outputs)  # ["aligned.tif"]
+```
+
+`input_images` contains the moving rasters; `output_images` specifies their destinations. Fixed references stay unchanged and have no output entries. The return value contains output paths in input order.
+
+To align multiple images jointly without a fixed reference:
+
+```python
+outputs = align_image_pair(
+    ["tile_a.tif", "tile_b.tif", "tile_c.tif"],
+    "aligned/",
+    global_model="translation",
+    local_model="piecewise_affine",
+)
+```
+
+The output folder receives one file per moving raster. The Python API also accepts input folders, glob patterns, and output filename templates.
+
+### Common options
+
+| Option | Purpose |
+| --- | --- |
+| `global_model` | Choose `none`, `translation`, `similarity`, or `affine`. |
+| `local_model` | Choose `none`, `bilinear`, or `piecewise_affine`. |
+| `input_images_bands`, `fixed_images_bands` | Select one-based bands for matching. All bands are retained in outputs. |
+| `tie_save_path`, `tie_load_path` | Save and reuse selected tie points. |
+| `tie_save_crs_path` | Export tie points to a GIS vector file. |
+| `resolution`, `tap` | Set output pixel spacing and align bounds to the target pixel grid. |
+| `window_size`, `save_as_cog` | Configure output tiles and Cloud-Optimized GeoTIFF writing. |
+
+Moving-image pairs use ORB by default; pairs involving fixed references use Elastix. Set `local_model="none"` when only an image-wide correction is needed.
+
+## Command-line usage
+
+```bash
+align-image-pair \
+  --input-images source.tif \
+  --output-images aligned.tif \
+  --fixed-images reference.tif \
+  --options '{"global_model":"translation","local_model":"piecewise_affine"}'
+```
+
+`--options` accepts algorithm keyword arguments as a JSON object. The command prints `{"output_images": ["aligned.tif"]}`.
 
 ```bash
 align-image-pair --help
 ```
 
-You can also run the module directly:
-
-```bash
-python -m coregix.cli.align_image_pair --help
-```
-
 ### Docker
 
-Build the image from the repository root:
+Build and run the CLI with a mounted data directory:
 
 ```bash
 docker build -t coregix .
+docker run --rm -v "$PWD:/data" coregix \
+  --input-images /data/source.tif \
+  --output-images /data/aligned.tif \
+  --fixed-images /data/reference.tif
 ```
 
-Release images are published to Docker Hub as `iosefa/coregix`.
+## Input requirements
 
-Run the CLI with a mounted data directory:
+- Rasters must share a coordinate reference system and have unique basenames.
+- Alignment requires overlapping valid pixels with enough shared image structure to find matches.
+- Raster masks and nodata metadata define valid matching regions.
+- Matching band numbers are one-based; multiple selected bands are averaged for matching.
 
-```bash
-docker run --rm \
-  -v "$PWD:/data" \
-  iosefa/coregix:latest \
-  --moving-image /data/source.tif \
-  --fixed-image /data/reference.tif \
-  --output-image /data/aligned.tif
-```
+## Documentation
 
-If you built the image locally, use `coregix` instead of `iosefa/coregix:latest`.
-
-## CLI usage
-
-### Coregister a source image to a reference image
-
-```bash
-align-image-pair \
-  --moving-image /path/to/source.tif \
-  --fixed-image /path/to/reference.tif \
-  --output-image /path/to/aligned.tif
-```
-
-By default this:
-- registers on edge-proxy images
-- writes the result on the source-raster grid
-- uses no chunking (`--split-factor 0`)
-
-### Use chunking for large source rasters
-
-`--split-factor` controls chunked transform application as `2^k` total chunks:
-- `0`: no split
-- `1`: halves
-- `2`: quadrants
-- `3`: octants
-
-Example with quadrants:
-
-```bash
-align-image-pair \
-  --moving-image /path/to/source_large.tif \
-  --fixed-image /path/to/reference.tif \
-  --output-image /path/to/aligned_large.tif \
-  --split-factor 2
-```
-
-### Use coarse-to-fine registration for large initial offsets
-
-`--solve-resolutions` runs multiple registration solves from coarse to fine,
-then writes the final raster once from the original source image. Use `0` for
-the reference-raster/native solve resolution.
-
-`--solve-resolution` is deprecated and remains available for single-pass
-compatibility. Prefer `--solve-resolutions`, even for one solve.
-
-```bash
-align-image-pair \
-  --moving-image /path/to/source_large.tif \
-  --fixed-image /path/to/reference.tif \
-  --output-image /path/to/aligned_large.tif \
-  --split-factor 2 \
-  --solve-resolutions 8,4,0.5
-```
-
-### Remove invalid edge artifacts after alignment
-
-`--trim-edge-invalid` runs a raster-space cleanup pass after alignment and sets edge artifacts to nodata.
-
-Example:
-
-```bash
-align-image-pair \
-  --moving-image /path/to/source_large.tif \
-  --fixed-image /path/to/reference.tif \
-  --output-image /path/to/aligned_large_edgefixed.tif \
-  --split-factor 2 \
-  --trim-edge-invalid \
-  --edge-trim-depth 8 \
-  --edge-trim-invalid-below -3000
-```
-
-The edge-trim thresholds are dataset-specific. `--edge-trim-invalid-below` is useful when interpolation artifacts are not equal to the dataset nodata value.
-
-## Python usage
-
-### Basic alignment
-
-```python
-from coregix import align_image_pair
-
-result = align_image_pair(
-    moving_image_path="/path/to/source.tif",
-    fixed_image_path="/path/to/reference.tif",
-    output_image_path="/path/to/aligned.tif",
-)
-
-print(result.output_image_path)
-```
-
-### Large raster with chunking and edge cleanup
-
-```python
-from coregix import align_image_pair
-
-result = align_image_pair(
-    moving_image_path="/path/to/source_large.tif",
-    fixed_image_path="/path/to/reference.tif",
-    output_image_path="/path/to/aligned_large_edgefixed.tif",
-    split_factor=2,
-    trim_edge_invalid=True,
-    edge_trim_depth=8,
-    edge_trim_invalid_below=-3000,
-)
-
-print(result.output_image_path)
-```
-
-## Notes
-
-- `split_factor` changes only transform application, not the registration model.
-- `split_factor=2` is the direct replacement for the previous quadrant-based large-raster path.
-- If needed, you can select separate registration bands with `moving_band_index` and `fixed_band_index` in Python or `--moving-band-index` and `--fixed-band-index` in the CLI.
+See [alignment usage](docs/usage/alignment.md), [large-raster processing](docs/usage/large-rasters.md), and the [API reference](docs/api/alignment.md) for details. Standalone [edge trimming](docs/usage/edge-trimming.md) is available to clean invalid border artifacts after alignment.

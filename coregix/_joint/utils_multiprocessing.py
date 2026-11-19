@@ -1,0 +1,331 @@
+import inspect
+import multiprocessing as mp
+import os
+import sys
+from contextlib import ExitStack
+from contextvars import ContextVar
+from functools import wraps
+
+from .utils_progress import current_callback, phase, progress, progress_context
+from .progress_transport import local_worker_progress, dask_worker_progress
+
+from concurrent.futures import Future, ThreadPoolExecutor, ProcessPoolExecutor, as_completed, wait
+from typing import Tuple, Literal, Callable, Optional
+
+from .utils_thread_balance import current_tile_threads
+from .utils_output import current_output_context
+from .utils_logging import _print_image_completed, _run_logged_image, _image_id
+from .substeps import substep
+
+from .types_and_validation import (
+    Universal,
+    _validate_dask_scheduler,
+    _validate_concurrent_processing_config,
+)
+
+
+_IMAGE_EXECUTOR = ContextVar("coregix_image_executor", default=None)
+
+
+def current_executor():
+    """Return the caller-owned image executor in the current coordination context."""
+    return _IMAGE_EXECUTOR.get()
+
+
+def uses_executor(function):
+    """Expose an optional executor without forwarding it to worker task arguments.
+
+    The caller owns shutdown. Nested image phases reuse it; tile pools remain
+    independent. submit() must return concurrent.futures-compatible futures.
+    Dask bridges may expose their existing client as _client for worker progress.
+    """
+    @wraps(function)
+    def wrapped(*args, executor=None, **kwargs):
+        if executor is not None and not callable(getattr(executor, "submit", None)):
+            raise TypeError("executor must provide submit()")
+        token = _IMAGE_EXECUTOR.set(executor if executor is not None else current_executor())
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _IMAGE_EXECUTOR.reset(token)
+    if wrapped.__doc__:
+        wrapped.__doc__ += "\n\n    executor: Optional caller-owned executor for image/pair jobs; never shut down by Coregix."
+    return wrapped
+
+
+
+def _balanced_task_args(function, args, executor, remaining):
+    """Allocate threads at dispatch, including workers with pre-resolved flags."""
+    allocate = getattr(executor, "tile_threads_for_jobs", None)
+    if allocate is None:
+        return args
+    signature = inspect.signature(function)
+    bound = signature.bind(*args)
+    bound.apply_defaults()
+    for name in ("tile_threads", "tile_thread_workers", "tile_workers"):
+        if name not in bound.arguments:
+            continue
+        if name in ("tile_thread_workers", "tile_workers") and (bound.arguments.get("tile_thread_on") is False or bound.arguments.get("tile_threads_on") is False):
+            continue
+        bound.arguments[name] = allocate(bound.arguments[name], remaining)
+    return bound.args
+
+
+def _run_image_tasks(
+    function,
+    args,
+    *,
+    input_paths,
+    output_paths,
+    parallel=False,
+    backend="thread",
+    workers=None,
+    concurrent_processing_backend="process_pool",
+    dask_scheduler=None,
+    executor_factory=None,
+    executor=None,
+    unit=None,
+    reused=0,
+    result_callback=None,
+    collect_results=True,
+    progress_callback=None,
+):
+    """Run tasks, optionally commit each result in a parent callback before logging completion, and collect results in input order."""
+    executor = executor if executor is not None else current_executor()
+    total = len(args)
+    make_budget = getattr(executor, "image_thread_budget", None)
+    thread_budget = make_budget(total) if make_budget is not None else None
+    if len(input_paths) != total or len(output_paths) != total:
+        raise ValueError(
+            "Each image task must have matching input and output progress paths."
+        )
+    callback = progress_callback if progress_callback is not None else current_callback()
+    results = [None] * total if collect_results else []
+    unit = unit or ("pairs" if input_paths and all(isinstance(p, tuple) and len(p) == 2 for p in input_paths) else "images")
+    with (
+        progress_context(callback),
+        substep(callback, phase(), total, unit=unit, kind="jobs", reused=reused) as phase_row,
+        progress(total=total, desc=phase(), unit=unit, callback=callback) as bar,
+    ):
+        # tqdm disables its counter when silent, so retain an independent count.
+        completed = 0
+        def commit(index, result, details):
+            nonlocal completed
+            if result_callback is not None:
+                result_callback(index, result)
+            if collect_results:
+                results[index] = result
+            completed += 1
+            if thread_budget is not None:
+                thread_budget.completed()
+            phase_row.commit(str(index))
+            bar.update(1)
+            _print_image_completed(input_paths[index], completed, total, details=details)
+
+        if not parallel and executor is None:
+            for index, (arg, source, destination) in enumerate(zip(args, input_paths, output_paths)):
+                result, details = _run_logged_image(function, source, destination, arg, phase_row.reporter(callback, index, _image_id(source)), current_output_context())
+                commit(index, result, details)
+            return results
+        factory = executor_factory or _get_executor
+        with ExitStack() as stack:
+            remote = hasattr(executor, "_client") if executor is not None else concurrent_processing_backend == "dask"
+            # Local queues outlive the executor so already-running workers can finish.
+            reporter = None if remote else stack.enter_context(
+                local_worker_progress(callback, processes=executor is not None or backend == "process")
+            )
+            if executor is None:
+                executor = stack.enter_context(factory(
+                    backend, workers, concurrent_processing_backend=concurrent_processing_backend,
+                    dask_scheduler=dask_scheduler,
+                ))
+            if remote and callback is not None:
+                reporter = stack.enter_context(dask_worker_progress(callback, executor._client))
+            futures = {}
+            try:
+                # Keep balancing queues bounded so later jobs receive capacity
+                # released by earlier completions, using this phase's real task count.
+                limit = getattr(executor, "image_worker_limit", total) or total
+                next_index = 0
+                while next_index < total or futures:
+                    while next_index < total and len(futures) < limit:
+                        index = next_index
+                        next_index += 1
+                        source, destination = input_paths[index], output_paths[index]
+                        arg = args[index] if thread_budget is not None else _balanced_task_args(function, args[index], executor, total - completed)
+                        task = (function, source, destination, arg, phase_row.reporter(reporter, index, _image_id(source)), current_output_context())
+                        if thread_budget is not None:
+                            task += (thread_budget,)
+                        futures[executor.submit(_run_logged_image, *task)] = index
+                    future = next(as_completed(futures))
+                    index = futures.pop(future)
+                    result, details = future.result()
+                    commit(index, result, details)
+            finally:
+                for pending in futures:
+                    pending.cancel()
+                wait(futures)  # Keep progress queues alive for workers already running.
+    return results
+
+
+def _parse_dask_scheduler(value: Universal.DaskScheduler):
+    """Validate and normalize a Dask scheduler connection tuple."""
+    _validate_dask_scheduler(value)
+    if value is None:
+        return None
+    kind, target = value
+    target = (
+        os.path.abspath(os.path.expanduser(target))
+        if kind == "file"
+        else target.strip()
+    )
+    if kind == "file" and not os.path.isfile(target):
+        raise ValueError(f"Dask scheduler file does not exist: {target}")
+    return kind, target
+
+
+def _choose_context(prefer_fork: bool = True) -> mp.context.BaseContext:
+    """
+    Chooses the most appropriate multiprocessing context based on platform and preference.
+
+    Args:
+        prefer_fork (bool): If True, prefers "fork" context where available; default is True.
+
+    Returns:
+        mp.context.BaseContext: Selected multiprocessing context ("fork", "forkserver", or "spawn").
+    """
+
+    if prefer_fork and sys.platform.startswith("linux"):
+        return mp.get_context("fork")
+    if prefer_fork and sys.platform == "darwin":
+        try:
+            return mp.get_context("fork")
+        except ValueError:
+            pass
+    try:
+        return mp.get_context("forkserver")
+    except ValueError:
+        return mp.get_context("spawn")
+
+
+def _resolve_parallel_config(
+    workers: Literal["cpu"] | int | None,
+    concurrent_processing_backend: Universal.ConcurrentProcessingBackend = "process_pool",
+    dask_scheduler: Universal.DaskScheduler = None,
+) -> Tuple[bool, Optional[int]]:
+    """
+    Parses a parallel worker config into execution flags and worker count.
+
+    Args:
+        workers ("cpu" | int | None): Number of workers.
+            - "cpu" → use os.cpu_count()
+            - int   → use that many workers
+            - None  → disables parallelism
+
+    Returns:
+        Tuple[bool, Optional[int]]:
+            - Whether to run in parallel,
+            - Number of workers.
+    """
+    _validate_concurrent_processing_config(
+        concurrent_processing_backend, dask_scheduler, workers
+    )
+    if concurrent_processing_backend == "dask":
+        return True, None
+    if workers is None:
+        return False, 1
+    max_workers = os.cpu_count() if workers == "cpu" else int(workers)
+    return True, max_workers
+
+
+def _get_executor(
+    backend: str,
+    max_workers: Optional[int],
+    initializer: Optional[Callable] = None,
+    initargs: Optional[tuple] = None,
+    concurrent_processing_backend: Universal.ConcurrentProcessingBackend = "process_pool",
+    dask_scheduler: Universal.DaskScheduler = None,
+):
+    """
+    Creates a parallel executor (process or thread) with optional initialization logic.
+
+    Args:
+        backend (str): Execution backend, either "process" or "thread".
+        max_workers (int): Maximum number of worker processes or threads.
+        initializer (Callable, optional): Function to initialize worker context.
+        initargs (tuple, optional): Arguments to pass to the initializer.
+        concurrent_processing_backend: Execution backend for image-level tasks.
+        dask_scheduler: Existing scheduler connection tuple required by Dask mode.
+
+    Returns:
+        Executor: An instance of ThreadPoolExecutor or ProcessPoolExecutor.
+
+    Raises:
+        ValueError: If the backend is not "process" or "thread".
+    """
+
+    _validate_concurrent_processing_config(
+        concurrent_processing_backend, dask_scheduler, None
+    )
+    if concurrent_processing_backend == "dask":
+        return _DaskExecutor(dask_scheduler)
+
+    max_workers = current_tile_threads(max_workers)
+    if backend == "process":
+        return ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=initializer,
+            initargs=initargs or (),
+            # Progress delivery uses a parent reader thread; never fork that state.
+            mp_context=_choose_context(prefer_fork=current_callback() is None),
+        )
+
+    elif backend == "thread":
+        if initializer is not None:
+            # Run initializer immediately in the main thread for all worker threads to share context
+            initializer(*(initargs or ()))
+        return ThreadPoolExecutor(max_workers=max_workers)
+
+    else:
+        raise ValueError(f"Unsupported backend: {backend}")
+
+
+class _DaskExecutor:
+    """Expose a Dask client through the concurrent-futures interface used here."""
+
+    def __init__(self, scheduler: Universal.DaskScheduler):
+        scheduler = _parse_dask_scheduler(scheduler)
+        try:
+            from dask.distributed import Client
+        except ImportError as exc:
+            raise ImportError(
+                "Dask execution requires dask.distributed; install dask[distributed]."
+            ) from exc
+        kind, target = scheduler
+        self._client = Client(scheduler_file=target) if kind == "file" else Client(target)
+        self._futures = []
+
+    def submit(self, function, /, *args, **kwargs):
+        dask_future = self._client.submit(function, *args, pure=False, **kwargs)
+        concurrent_future = Future()
+
+        def complete(future):
+            try:
+                concurrent_future.set_result(future.result())
+            except BaseException as exc:
+                concurrent_future.set_exception(exc)
+
+        dask_future.add_done_callback(complete)
+        self._futures.append(dask_future)
+        return concurrent_future
+
+    def shutdown(self, wait: bool = True, cancel_futures: bool = False):
+        if cancel_futures:
+            self._client.cancel(self._futures)
+        self._client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.shutdown(wait=True, cancel_futures=exc_type is not None)

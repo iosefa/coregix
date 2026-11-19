@@ -4,37 +4,6 @@ Resampling can leave invalid border artifacts around nodata regions. Edge trimmi
 
 Use edge trimming when the aligned output contains narrow border artifacts near nodata areas. It is not a replacement for registration; it only modifies output pixels after alignment.
 
-## Trim During Alignment
-
-Add `--trim-edge-invalid` to run cleanup after the coregistered output is written:
-
-```bash
-align-image-pair \
-  --moving-image /path/to/source_large.tif \
-  --fixed-image /path/to/reference.tif \
-  --output-image /path/to/aligned_trimmed.tif \
-  --split-factor 2 \
-  --trim-edge-invalid \
-  --edge-trim-depth 8 \
-  --edge-trim-invalid-below -3000
-```
-
-Python:
-
-```python
-from coregix import align_image_pair
-
-result = align_image_pair(
-    moving_image_path="/path/to/source_large.tif",
-    fixed_image_path="/path/to/reference.tif",
-    output_image_path="/path/to/aligned_trimmed.tif",
-    split_factor=2,
-    trim_edge_invalid=True,
-    edge_trim_depth=8,
-    edge_trim_invalid_below=-3000,
-)
-```
-
 ## Trim An Existing Raster
 
 The standalone trim command can be used after alignment:

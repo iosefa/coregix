@@ -26,11 +26,15 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
       - name: Install package and docs dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev
           python -m pip install --upgrade pip
+          pip install numpy
+          pip install "GDAL==$(gdal-config --version)"
           pip install -e ".[docs]"
 
       - name: Build MkDocs site

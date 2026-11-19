@@ -39,7 +39,11 @@ jobs:
 
       - name: Install package and test dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev
           python -m pip install --upgrade pip
+          pip install numpy
+          pip install "GDAL==$(gdal-config --version)"
           pip install -e ".[test]"
 
       - name: Run tests

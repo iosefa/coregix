@@ -13,5 +13,5 @@ dependencies:
   - pytest>=7.4
   - rasterio>=1.4.3
   - pip:
-      - itk-elastix>=0.19.2
+      - itk-elastix>=0.23
       - -e ".[docs,test]"

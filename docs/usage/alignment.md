@@ -1,145 +1,31 @@
-# Align Image Pairs
+# Joint Alignment
 
-This page covers the standard pairwise coregistration case: one source raster, one reference raster, and one coregistered GeoTIFF output.
-
-The CLI keeps the registration library's argument names:
-
-- `--moving-image` is the source raster that will be transformed.
-- `--fixed-image` is the reference raster used for alignment.
-
-## Basic CLI Alignment
-
-```bash
-align-image-pair \
-  --moving-image /path/to/source.tif \
-  --fixed-image /path/to/reference.tif \
-  --output-image /path/to/aligned.tif
-```
-
-By default, the CLI:
-
-- estimates registration on edge-proxy images
-- clips the reference domain to the source-raster bounds
-- uses the mutual valid-data overlap for registration masks
-- writes the result on the source-raster grid
-- uses no chunking (`--split-factor 0`)
-
-The command prints a JSON summary:
-
-```json
-{
-  "output_image_path": "/path/to/aligned.tif",
-  "temp_dir": null
-}
-```
-
-## Basic Python Alignment
-
-The same settings can be used from Python:
+Use `align_image_pair` to jointly align overlapping rasters, optionally anchored to fixed references.
 
 ```python
 from coregix import align_image_pair
 
-result = align_image_pair(
-    moving_image_path="/path/to/source.tif",
-    fixed_image_path="/path/to/reference.tif",
-    output_image_path="/path/to/aligned.tif",
-)
-
-print(result.output_image_path)
-```
-
-The CLI and Python API use the same registration defaults.
-
-## Registration Bands
-
-Registration is estimated from one band in each raster. Use `--band-index` when the same 0-based band should be used from both rasters:
-
-```bash
-align-image-pair \
-  --moving-image source.tif \
-  --fixed-image reference.tif \
-  --output-image aligned.tif \
-  --band-index 2
-```
-
-Use separate band indexes when the best registration signal is in different bands:
-
-```bash
-align-image-pair \
-  --moving-image source.tif \
-  --fixed-image reference.tif \
-  --output-image aligned.tif \
-  --moving-band-index 0 \
-  --fixed-band-index 3
-```
-
-The same options are available in Python:
-
-```python
-align_image_pair(
-    moving_image_path="source.tif",
-    fixed_image_path="reference.tif",
-    output_image_path="aligned.tif",
-    moving_band_index=0,
-    fixed_band_index=3,
+outputs = align_image_pair(
+    ["source.tif"],
+    ["aligned.tif"],
+    fixed_images=["reference.tif"],
+    input_images_bands=[1],
+    fixed_images_bands=[1],
 )
 ```
 
-All source bands are transformed after the registration model is estimated.
-
-## Output Grid
-
-The default output grid is the source-raster grid:
+`input_images` contains moving rasters. `fixed_images` supplies references held stationary in both solvers; these have no output entries. Band numbers are one-based. Outputs retain all bands.
 
 ```bash
-align-image-pair \
-  --moving-image source.tif \
-  --fixed-image reference.tif \
-  --output-image aligned.tif \
-  --output-on-moving-grid
+align-image-pair --input-images source.tif --output-images aligned.tif --fixed-images reference.tif --options '{"local_model":"none"}'
 ```
 
-Use this when the aligned raster needs to remain compatible with a source image stack.
+`--options` accepts a JSON object of algorithm keyword arguments. The CLI prints a JSON object with an `output_images` list.
 
-Write on the reference-raster grid with:
+Moving pairs default to ORB; reference pairs default to Elastix. Global models are `none`, `translation`, `similarity`, and `affine`. Local models are `none`, `bilinear`, and `piecewise_affine`.
 
-```bash
-align-image-pair \
-  --moving-image source.tif \
-  --fixed-image reference.tif \
-  --output-image aligned_on_reference_grid.tif \
-  --no-output-on-moving-grid
-```
+`tie_sampling_method="overlap_spread"` distributes search centers through valid overlap pixels and is the default. `tie_sampling_method="grid"` uses `tie_grid_spacing`. Save selected matches with `tie_save_path` and reuse them with `tie_load_path`; use `tie_save_crs_path` for GIS point export.
 
-Use this when the output should match the reference raster's extent, transform, and pixel grid.
+`resolution=None` preserves native pixel spacing. Set a positive resolution or use `highest`, `average`, or `lowest` for a shared output resolution. `tap=True` aligns output bounds to the target pixel grid.
 
-## Nodata Overrides
-
-Coregix reads raster masks and nodata metadata when building registration masks. If the source metadata is missing or incorrect, provide nodata values explicitly:
-
-```bash
-align-image-pair \
-  --moving-image source.tif \
-  --fixed-image reference.tif \
-  --output-image aligned.tif \
-  --moving-nodata 0 \
-  --fixed-nodata 0 \
-  --output-nodata 0
-```
-
-`--output-nodata` controls the value written into invalid output pixels.
-
-## Debugging Registration
-
-Temporary registration images and masks are normally deleted after the command finishes. Keep them when diagnosing a failed or unexpected registration:
-
-```bash
-align-image-pair \
-  --moving-image source.tif \
-  --fixed-image reference.tif \
-  --output-image aligned.tif \
-  --keep-temp-dir
-```
-
-Use `--temp-dir` to choose the parent directory for temporary files, and `--log-to-console` to print registration backend logs.
+The previous pairwise arguments and `AlignmentResult` return type have been removed. The return value is a list of output paths. Use the standalone [edge trimming](edge-trimming.md) API after alignment when needed.
