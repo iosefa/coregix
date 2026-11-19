@@ -1,5 +1,5 @@
-"""Pairwise raster coregistration for geospatial imagery."""
+"""Joint raster coregistration for geospatial imagery."""
 
-from .pipelines.alignment import AlignmentResult, align_image_pair
+from .pipelines.alignment import align_image_pair
 
-__all__ = ["AlignmentResult", "align_image_pair"]
+__all__ = ["align_image_pair"]

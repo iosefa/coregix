@@ -41,9 +41,9 @@ Run the alignment command by mounting a directory that contains your rasters:
 docker run --rm \
   -v "$PWD:/data" \
   iosefa/coregix:latest \
-  --moving-image /data/source.tif \
-  --fixed-image /data/reference.tif \
-  --output-image /data/aligned.tif
+  --input-images /data/source.tif \
+  --fixed-images /data/reference.tif \
+  --output-images /data/aligned.tif
 ```
 
 If you built the image locally, use `coregix` instead of `iosefa/coregix:latest`.

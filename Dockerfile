@@ -1,7 +1,7 @@
 FROM condaforge/miniforge3:latest
 
 LABEL org.opencontainers.image.title="Coregix"
-LABEL org.opencontainers.image.description="Pairwise raster coregistration for geospatial imagery"
+LABEL org.opencontainers.image.description="Joint raster coregistration for geospatial imagery"
 LABEL org.opencontainers.image.source="https://github.com/iosefa/coregix"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]

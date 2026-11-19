@@ -14,7 +14,7 @@ coregix = ["py.typed"]
 [project]
 name = "coregix"
 version = "0.3.0"
-description = "Pairwise raster coregistration for geospatial imagery"
+description = "Joint raster coregistration for geospatial imagery"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -24,7 +24,7 @@ authors = [
 maintainers = [
     {name = "Joseph Emile Honour Percival", email = "ipercival@gmail.com"}
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -34,7 +34,13 @@ dependencies = [
     "affine>=2.4",
     "numpy>=2.2",
     "rasterio>=1.4.3",
-    "itk-elastix>=0.19.2"
+    "itk-elastix>=0.23",
+    "scipy>=1.15.2",
+    "opencv-python-headless>=4.10",
+    "wcmatch>=11.0",
+    "tqdm>=4.66",
+    "gdal>=3.5",
+    "fiona>=1.10.1"
 ]
 
 [project.optional-dependencies]
